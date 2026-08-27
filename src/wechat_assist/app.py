@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from wechat_assist.ai.suggest import suggest_replies, test_connection
+from wechat_assist.ai.suggest import normalize_tone, suggest_replies, test_connection
 from wechat_assist.config import AppSettings, load_settings, save_settings
 from wechat_assist.safety import SendGuard
 from wechat_assist.wechat.ax import dump_tree, open_accessibility_settings
@@ -29,6 +29,7 @@ class SettingsUpdate(BaseModel):
     context_messages: int | None = Field(default=None, ge=4, le=80)
     anonymize_names: bool | None = None
     include_chat_name: bool | None = None
+    reply_tone: str | None = None
     system_style: str | None = None
     send_mode: str | None = None
     min_send_interval_seconds: float | None = None
@@ -54,6 +55,7 @@ class SendBody(BaseModel):
 
 class SuggestBody(BaseModel):
     quote: QuoteBody | None = None
+    tone: str | None = None
 
 
 @app.get("/api/health")
@@ -70,6 +72,7 @@ def status() -> dict:
         "provider": settings.provider,
         "model": settings.model,
         "send_mode": settings.send_mode,
+        "reply_tone": settings.reply_tone,
         "has_api_key": bool(settings.api_key)
         or settings.provider == "ollama"
         or (settings.api_key or "").startswith("AIza"),
@@ -117,6 +120,8 @@ def suggest(body: SuggestBody = SuggestBody()) -> dict:
     if not snap.messages:
         raise HTTPException(400, snap.note or "当前没有可读的消息。请在微信中打开一个聊天。")
     quote = body.quote.model_dump() if body and body.quote and body.quote.text.strip() else None
+    if body and body.tone:
+        settings = settings.model_copy(update={"reply_tone": normalize_tone(body.tone)})
     try:
         items = suggest_replies(
             settings,
@@ -174,6 +179,8 @@ def put_settings(update: SettingsUpdate) -> dict:
     incoming = update.model_dump(exclude_unset=True)
     if incoming.get("api_key") and "…" in incoming["api_key"]:
         incoming.pop("api_key")
+    if "reply_tone" in incoming:
+        incoming["reply_tone"] = normalize_tone(incoming.get("reply_tone"))
     data.update({k: v for k, v in incoming.items() if v is not None})
     saved = AppSettings.model_validate(data)
     save_settings(saved)

@@ -11,6 +11,16 @@ SETTINGS_PATH = CONFIG_DIR / "settings.json"
 
 ProviderName = Literal["openai", "anthropic", "gemini", "ollama", "custom"]
 SendMode = Literal["fill_only", "fill_and_send"]
+ReplyTone = Literal[
+    "natural",
+    "concise",
+    "friendly",
+    "professional",
+    "warm",
+    "humorous",
+    "firm",
+    "varied",
+]
 
 
 class AppSettings(BaseModel):
@@ -22,7 +32,8 @@ class AppSettings(BaseModel):
     context_messages: int = Field(default=20, ge=4, le=80)
     anonymize_names: bool = True
     include_chat_name: bool = False
-    system_style: str = "像真人微信聊天，简洁自然，不要书面腔。"
+    reply_tone: ReplyTone = "natural"
+    system_style: str = ""
     send_mode: SendMode = "fill_and_send"
     min_send_interval_seconds: float = Field(default=8.0, ge=2.0, le=120.0)
     max_sends_per_hour: int = Field(default=20, ge=1, le=80)

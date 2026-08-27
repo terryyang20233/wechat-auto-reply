@@ -1,57 +1,76 @@
-# 微信回复助手
+# WeChat Reply Assistant
 
-本机运行的 **AI 回复参考助手**：读取当前微信窗口的消息，让你自己的 AI 给出几条回复备选，**只有你点了才会写入/发送**。
+[中文说明](README.zh.md)
 
-它刻意不是 24 小时自动机器人。适合个人在自己的 Mac 上使用；不建议做成公开的自动群发工具。
+A **local AI reply helper** for WeChat on Mac: it reads the chat that is already open, asks **your** AI API for a few draft replies, and writes into the official WeChat client **only after you click**.
 
-## 它怎么工作
+It is not a 24/7 auto-bot. Use it on your own Mac. Do not turn it into a mass-messaging tool.
+
+## How it works
 
 ```text
-微信官方客户端（前台聊天）
-        │  macOS 辅助功能（像你在看屏幕、点输入框）
+Official WeChat for Mac (foreground chat)
+        │  macOS Accessibility (same idea as looking at the screen)
         ▼
-本机助手 http://127.0.0.1:8765
-        │  只把匿名化后的最近几条消息发给「你配置的」AI
+Local helper  http://127.0.0.1:8765
+        │  Only anonymized recent lines go to the AI you configured
         ▼
-界面展示若干回复 → 你点选 → 填入微信 / 再按回车发出
+UI shows several drafts → you pick one → fill WeChat / send after you confirm
 ```
 
-可选：在左侧点一条消息作为「引用」，生成建议会针对它，发送时也会在微信里先引用该消息。
+Optional: click a bubble on the left to **quote** it. Suggestions target that message; send will Quote/引用 in WeChat first.
 
-### 设计取舍
+### Reply tone
 
-**消息保密**
+On the suggestion panel (and in Settings) you can pick a tone before generating:
 
-- 服务只监听 `127.0.0.1`，没有云端账号、没有项目方服务器。
-- 聊天内容默认 **不写日志、不落库**。
-- 发给 AI 前会把发言者角色化为「我 / 对方 / 成员N」，并去掉明显手机号等标识。
-- API Key 存在本机 `~/.wechat-assist/settings.json`，文件权限 `600`，**不要提交到 Git**。
-- 想让内容完全不出网：在设置里选 **Ollama**，用本机模型。
+| Option | Effect |
+|---|---|
+| Natural | Casual WeChat voice (default) |
+| Concise | One or two short lines |
+| Friendly | Warm but not gushy |
+| Professional | Polite, work-safe |
+| Warm | Softer / caring |
+| Humorous | Light, not mocking |
+| Direct | Clear and firm |
+| Mixed | One suggestion per different tone |
 
-**微信封号风险**
+You can still add a free-text style note in Settings (for example: “reply in English if they used English”).
 
-个人号没有官方机器人 API。风险从高到低大致是：
+### Design choices
 
-| 做法 | 风险 | 本项目 |
+**Privacy**
+
+- The server binds to `127.0.0.1` only. There is no project cloud and no account on our side.
+- Chat text is not logged or stored by default.
+- Before the model runs, speakers become `我 / 对方 / 成员N`, and obvious phone numbers are stripped.
+- API keys live in `~/.wechat-assist/settings.json` with mode `600`. **Do not commit this file.**
+- To keep content off the network: choose **Ollama** and a local model.
+
+**Ban risk**
+
+Personal WeChat has no official bot API. Rough ranking:
+
+| Approach | Risk | This project |
 |---|---|---|
-| 模拟协议 / 网页版 / iPad 协议登录 | 高 | 不用 |
-| 注入、Hook 微信进程 | 中高 | 不用 |
-| 解密本地数据库、关 SIP 扫内存 | 读取风险低，但要降系统安全 | 不用 |
-| 通过系统辅助功能操作官方客户端 | 相对低，仍可能被行为风控 | **采用** |
-| 你自己点选后再发、限制频率 | 更接近真人 | **强制** |
+| Protocol / web / iPad login | High | Not used |
+| Inject or hook the WeChat process | Medium–high | Not used |
+| Decrypt the local DB, disable SIP, scrape memory | Lower read risk, weaker OS security | Not used |
+| Drive the official client via Accessibility | Relatively lower; behavior heuristics still exist | **Used** |
+| You click before send; rate limits | Closer to a human | **Required** |
 
-仍然不是零风险：高频群发、秒回、通宵自动回复都可能被判异常。默认开启最短发送间隔和每小时条数上限；也可改成「只填入输入框，由你按回车」。
+Not zero risk: high-volume blasts, instant replies, and overnight auto-reply can still look abusive. Defaults: minimum interval between sends and a per-hour cap. You can switch to **fill only** and press Enter yourself.
 
-## 环境
+## Requirements
 
 - macOS
 - Python 3.11+
-- 已安装并登录 **Mac 版微信**（开发时在 3.8.x 英文界面下验证过）
-- 在「系统设置 → 隐私与安全性 → 辅助功能」中添加 **Python**（通常是 `Python.app`，例如 python.org 安装的  
-  `/Library/Frameworks/Python.framework/Versions/3.12/Resources/Python.app`）。  
-  只勾选 Cursor / 终端不够，因为读微信的是 Python 进程。添加后必须重启助手。
+- **WeChat for Mac** installed and signed in (developed against English UI 3.8.x)
+- System Settings → Privacy & Security → Accessibility: add **Python** (usually `Python.app`, e.g. a python.org install at  
+  `/Library/Frameworks/Python.framework/Versions/3.12/Resources/Python.app`).  
+  Checking only Cursor or Terminal is not enough — the process that reads WeChat is Python. Restart the helper after granting access.
 
-## 启动
+## Run
 
 ```bash
 python3 -m venv .venv
@@ -60,25 +79,37 @@ pip install -e ".[macos]"
 python -m wechat_assist
 ```
 
-浏览器打开 [http://127.0.0.1:8765](http://127.0.0.1:8765)（仅本机）。
+Open [http://127.0.0.1:8765](http://127.0.0.1:8765) (this machine only).
 
-1. 打开微信，点进要回复的聊天。
-2. 在助手里确认已读到上下文。
-3. 设置里填入你的 AI Key，或改用 Ollama。
-4. （可选）点左侧一条消息作为引用。
-5. 点「生成建议」，编辑后选择「发送到微信」或「只填入输入框」。
+1. Open WeChat and select the chat you want to answer.
+2. Confirm the helper shows that context.
+3. In Settings, paste your AI key, or switch to Ollama.
+4. (Optional) Click a message to quote it. Pick a reply tone.
+5. Click **Generate**, edit a draft, then **Send to WeChat** or **Fill input only**.
 
-## 推荐的 AI 配置
+## Suggested AI setup
 
-- **Google Gemini**：提供商选 Gemini，填 AI Studio 的 Key（一般以 `AIza` 开头），模型如 `gemini-3.6-flash`，Base 可留空。部分新账号无法使用 `gemini-2.5-flash`。
-- **隐私优先**：Ollama + 本机模型，API Base 留空即可（默认 `http://127.0.0.1:11434/v1`）。
-- **其他**：OpenAI / Anthropic / DeepSeek 等，Base 填对应兼容地址。
+- **Google Gemini**: provider Gemini, AI Studio key (usually starts with `AIza`), model e.g. `gemini-3.6-flash`, Base can be empty. Some new accounts cannot use `gemini-2.5-flash`.
+- **Privacy first**: Ollama + a local model; leave API Base empty (default `http://127.0.0.1:11434/v1`).
+- **Other**: OpenAI / Anthropic / DeepSeek, etc., with the matching compatible Base URL.
 
-## 做不到什么
+## Limits
 
-- 不能在微信最小化、锁屏、或聊天被完全挡住时稳定读消息。
-- 不能代替企业微信开放平台；这是给 **你自己的 Mac 客户端** 用的参考工具。
-- 微信改版后，辅助功能树可能变化。若读不到消息，打开 `/api/diagnostics/ax` 查看控件树，再针对性适配。  
-  **不要把诊断输出、聊天原文或 `settings.json` 贴到公开 Issue。**
+- Reading is unreliable if WeChat is minimized, the screen is locked, or the chat is fully covered.
+- This is not WeCom / Work WeChat Open Platform. It only helps **your own Mac client**.
+- After a WeChat UI change, the Accessibility tree may break. Use `/api/diagnostics/ax` to inspect controls, then adapt.  
+  **Do not paste diagnostics, raw chat, or `settings.json` into a public issue.**
 
-使用即表示你理解：自动化个人微信可能违反微信软件许可，账号风险由使用者自行承担。本工具只在本机、且默认需要人工确认后才发送。
+By using this tool you understand that automating personal WeChat may violate WeChat’s software license. Account risk is yours. The helper stays on localhost and, by default, sends only after you confirm.
+
+## Publishing this repo (evaluation)
+
+The git remote already points at GitHub. Publishing as a **public** repo is possible but not free of product and policy risk. Recommended if you publish:
+
+1. **Keep it framed as a click-to-send helper**, never as an unattended bot. The current repo name `wechat-auto-reply` works against that story; `wechat-reply-assist` (or similar) is clearer.
+2. **Stay private until you are sure** no `settings.json`, API keys, Accessibility dumps, or real chat text ever landed in git history (`git log -p` / `gitleaks`). This snapshot looks clean: keys live under `~/.wechat-assist/`, and `.gitignore` already drops `settings.json`, `.env`, and dump files.
+3. **Do not ship `HANDOVER.md` on a public default branch** if you want less copy-paste of Accessibility internals. It is useful for local agents, not for end users. `LICENSE` should name a copyright holder before a public release.
+4. **GitHub ToS / WeChat ToS**: driving the official Mac client via Accessibility is not a protocol bot, but WeChat’s license still discourages automation. A public README must keep the risk table and “you click first” rule. GitHub may still take the repo down if it is marketed for spam or ban evasion.
+5. **If you go public**: MIT is already here; add Topics (`macos`, `accessibility`, `wechat`); pin the English README; link `README.zh.md`; never enable a hosted demo. Prefer **private** if this is only for you.
+
+This evaluation is not legal advice.

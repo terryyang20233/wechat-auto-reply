@@ -1,7 +1,7 @@
 [project]
 name = "wechat-assist"
 version = "0.1.0"
-description = "本机微信 AI 回复参考助手（macOS）"
+description = "Local WeChat AI reply assistant for macOS (click-to-send, not an auto-bot)"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

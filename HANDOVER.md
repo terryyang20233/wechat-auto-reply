@@ -57,6 +57,7 @@ You are continuing a local macOS project: a **WeChat AI reply assistant** (not a
 - UI is English-WeChat-biased (`Me`, `Messages`, `Chats`). Chinese UI needs parallel labels (already partially present).
 - No tests. No Windows/Android.
 - `/api/diagnostics/ax` can include message text in descriptions — treat dumps as sensitive.
+- English `README.md` + `README.zh.md` and reply-tone presets (`reply_tone` in settings / panel) are in. GitHub publish eval is in the English README; keep `HANDOVER.md` off a public default branch if you publish.
 
 ## Do not
 

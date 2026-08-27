@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx
 
-from wechat_assist.config import AppSettings
+from wechat_assist.config import AppSettings, ReplyTone
 from wechat_assist.privacy import anonymize_messages, build_transcript, describe_quote_for_model, redact_text
 
 SYSTEM_PROMPT = """你是用户本人的微信回复参考助手，不是自动机器人。
@@ -23,6 +23,35 @@ SYSTEM_PROMPT = """你是用户本人的微信回复参考助手，不是自动�
 - 只输出 JSON，格式如下：
 {"suggestions":[{"tone":"简洁","text":"..."},{"tone":"友好","text":"..."},{"tone":"认真","text":"..."}]}
 """
+
+TONE_GUIDES: dict[str, str] = {
+    "natural": "自然口语：像真人微信，短句、不书面、不客服腔。",
+    "concise": "简洁：尽量一两句说完，不铺垫、不重复。",
+    "friendly": "友好轻松：语气亲近，但不油腻、不堆表情。",
+    "professional": "得体克制：适合工作或不太熟的人，礼貌、清楚、不卖萌。",
+    "warm": "温柔关心：体贴、软一点，但仍像聊天而不是鸡汤。",
+    "humorous": "轻松幽默：可以轻微俏皮，但不嘲讽对方、不开过火的玩笑。",
+    "firm": "直接明确：态度清楚，不绕弯、不道歉过头。",
+    "varied": "几条建议用不同语气（如简洁 / 友好 / 认真），让用户好挑选。",
+}
+
+TONE_LABELS: dict[str, str] = {
+    "natural": "自然",
+    "concise": "简洁",
+    "friendly": "友好",
+    "professional": "得体",
+    "warm": "温柔",
+    "humorous": "幽默",
+    "firm": "直接",
+    "varied": "多样",
+}
+
+
+def normalize_tone(value: str | None) -> ReplyTone:
+    key = (value or "natural").strip().lower()
+    if key in TONE_GUIDES:
+        return key  # type: ignore[return-value]
+    return "natural"
 
 
 def test_connection(settings: AppSettings) -> dict[str, Any]:
@@ -70,11 +99,21 @@ def suggest_replies(
             "用户指定要在微信里引用下面这条消息来回复，请专门针对它写建议：\n"
             f"{quoted}\n\n"
         )
+    tone = normalize_tone(settings.reply_tone)
+    style_bits = [f"语气要求：{TONE_GUIDES[tone]}"]
+    if tone != "varied":
+        style_bits.append(
+            f"这 {settings.n_suggestions} 条都保持同一语气；JSON 里 tone 字段统一写成「{TONE_LABELS[tone]}」。"
+        )
+    custom = (settings.system_style or "").strip()
+    if custom:
+        style_bits.append(f"用户额外风格说明：{custom}")
     user_prompt = (
-        f"{settings.system_style.strip()}\n\n"
-        f"{extra}"
-        f"请给出 {settings.n_suggestions} 条回复备选。\n\n"
-        f"聊天记录：\n{transcript}"
+        "\n".join(style_bits)
+        + "\n\n"
+        + extra
+        + f"请给出 {settings.n_suggestions} 条回复备选。\n\n"
+        + f"聊天记录：\n{transcript}"
     )
     raw = _complete(settings, user_prompt)
     return _parse_suggestions(raw, settings.n_suggestions)

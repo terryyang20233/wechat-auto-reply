@@ -51,6 +51,19 @@
               <button id="btn-suggest" class="primary" type="button">生成建议</button>
             </div>
           </div>
+          <div class="tone-row">
+            <label for="reply-tone">回复语气</label>
+            <select id="reply-tone" name="reply_tone">
+              <option value="natural">自然口语</option>
+              <option value="concise">简洁</option>
+              <option value="friendly">友好轻松</option>
+              <option value="professional">得体（工作）</option>
+              <option value="warm">温柔关心</option>
+              <option value="humorous">轻松幽默</option>
+              <option value="firm">直接明确</option>
+              <option value="varied">几种语气各一条</option>
+            </select>
+          </div>
           <p id="quote-banner" class="muted action-note"></p>
           <div id="suggestions" class="suggestions empty-state">
             还没有建议。读取到聊天后点「生成建议」。
@@ -94,8 +107,20 @@
             <input name="context_messages" type="number" min="4" max="80" />
           </label>
         </div>
-        <label>回复风格补充
-          <textarea name="system_style" rows="2"></textarea>
+        <label>默认回复语气
+          <select name="reply_tone">
+            <option value="natural">自然口语</option>
+            <option value="concise">简洁</option>
+            <option value="friendly">友好轻松</option>
+            <option value="professional">得体（工作）</option>
+            <option value="warm">温柔关心</option>
+            <option value="humorous">轻松幽默</option>
+            <option value="firm">直接明确</option>
+            <option value="varied">几种语气各一条</option>
+          </select>
+        </label>
+        <label>额外风格说明（可空）
+          <textarea name="system_style" rows="2" placeholder="例如：少用语气词；对方用英文就回英文"></textarea>
         </label>
         <label class="check"><input name="anonymize_names" type="checkbox" /> 发给 AI 时隐藏真实姓名（推荐）</label>
         <label class="check"><input name="include_chat_name" type="checkbox" /> 把会话名称也发给 AI（一般不需要）</label>

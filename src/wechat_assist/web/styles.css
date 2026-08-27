@@ -165,6 +165,22 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 .card-actions { display: flex; gap: 8px; margin-top: 8px; }
 .action-note { padding: 0 18px 16px; min-height: 1.4em; }
 
+.tone-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 18px 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+.tone-row select {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 6px 10px;
+  background: #fff;
+  color: var(--ink);
+}
+
 .mask {
   position: fixed; inset: 0;
   background: rgba(28, 25, 21, 0.28);

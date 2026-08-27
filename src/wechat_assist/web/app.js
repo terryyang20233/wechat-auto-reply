@@ -6,6 +6,7 @@ const state = {
   status: null,
   quote: null,
   suggestQuote: null,
+  replyTone: "natural",
 };
 
 function setPill(id, ok, warnText, okText, badText) {
@@ -161,6 +162,10 @@ async function refreshStatus() {
     setPill("pill-ax", s.ax_trusted, "辅助功能", "辅助功能已开", "需要 Python 权限");
     setPill("pill-wechat", s.wechat_running, "微信", "微信运行中", "微信未打开");
     setPill("pill-ai", s.has_api_key, "AI", "AI 已配置", "未配置 API");
+    if (s.reply_tone) {
+      state.replyTone = s.reply_tone;
+      $("reply-tone").value = s.reply_tone;
+    }
     return s;
   } catch (err) {
     setPill("pill-ax", false, "", "", "服务未连接");
@@ -183,7 +188,7 @@ async function generate() {
   try {
     const data = await api("/api/suggest", {
       method: "POST",
-      body: JSON.stringify({ quote: state.quote }),
+      body: JSON.stringify({ quote: state.quote, tone: $("reply-tone").value }),
     });
     renderSuggestions(data.suggestions, data.chat_name);
     $("action-note").textContent = data.quoted
@@ -203,6 +208,10 @@ function fillForm(settings) {
     if (!field) continue;
     if (field.type === "checkbox") field.checked = Boolean(value);
     else field.value = value ?? "";
+  }
+  if (settings.reply_tone) {
+    state.replyTone = settings.reply_tone;
+    $("reply-tone").value = settings.reply_tone;
   }
 }
 
@@ -277,6 +286,14 @@ $("provider").addEventListener("change", (e) => {
   if (!form.api_base.value.trim() && preset.api_base) form.api_base.value = preset.api_base;
 });
 $("btn-suggest").addEventListener("click", generate);
+$("reply-tone").addEventListener("change", async (e) => {
+  state.replyTone = e.target.value;
+  try {
+    await api("/api/settings", { method: "PUT", body: JSON.stringify({ reply_tone: state.replyTone }) });
+  } catch (err) {
+    $("action-note").textContent = err.message;
+  }
+});
 $("btn-clear-quote").addEventListener("click", () => {
   state.quote = null;
   state.suggestQuote = null;
@@ -298,6 +315,7 @@ $("settings-form").addEventListener("submit", async (e) => {
     model: form.model.value,
     n_suggestions: Number(form.n_suggestions.value),
     context_messages: Number(form.context_messages.value),
+    reply_tone: form.reply_tone.value,
     system_style: form.system_style.value,
     anonymize_names: form.anonymize_names.checked,
     include_chat_name: form.include_chat_name.checked,
@@ -306,6 +324,8 @@ $("settings-form").addEventListener("submit", async (e) => {
     max_sends_per_hour: Number(form.max_sends_per_hour.value),
   };
   await api("/api/settings", { method: "PUT", body: JSON.stringify(body) });
+  state.replyTone = body.reply_tone;
+  $("reply-tone").value = body.reply_tone;
   closeSettings();
   refreshStatus();
   $("action-note").textContent = "设置已保存到本机。";
