@@ -1,0 +1,324 @@
+const $ = (id) => document.getElementById(id);
+
+const state = {
+  chat: null,
+  polling: true,
+  status: null,
+  quote: null,
+  suggestQuote: null,
+};
+
+function setPill(id, ok, warnText, okText, badText) {
+  const el = $(id);
+  el.classList.remove("ok", "bad", "warn");
+  if (ok === true) {
+    el.classList.add("ok");
+    el.textContent = okText;
+  } else if (ok === "warn") {
+    el.classList.add("warn");
+    el.textContent = warnText;
+  } else {
+    el.classList.add("bad");
+    el.textContent = badText;
+  }
+}
+
+async function api(path, options = {}) {
+  const res = await fetch(path, {
+    headers: { "Content-Type": "application/json" },
+    ...options,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const detail = data.detail || data.error || res.statusText;
+    throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+  }
+  return data;
+}
+
+function quoteKey(m) {
+  return `${m.sender_name || ""}\n${m.text || ""}\n${m.quote_text || ""}`;
+}
+
+function isPicked(m) {
+  return state.quote && quoteKey(state.quote) === quoteKey(m);
+}
+
+function updateQuoteBanner() {
+  const banner = $("quote-banner");
+  const q = state.quote;
+  if (!q) {
+    banner.textContent = "点左侧一条消息，可针对它生成建议，发送时也会在微信里引用。";
+    return;
+  }
+  const who = q.sender_name || (q.sender === "ME" ? "Me" : "未知");
+  const preview = (q.text || "").slice(0, 40);
+  banner.textContent = `将引用 ${who}：${preview}${(q.text || "").length > 40 ? "…" : ""}`;
+}
+
+function renderMessages(chat) {
+  $("chat-name").textContent = chat.chat_name || "未识别当前聊天";
+  $("chat-note").textContent = chat.note || (chat.messages?.length ? "来自当前微信窗口的可见消息。" : "请把微信聊天窗口放到前台。");
+  const box = $("messages");
+  if (!chat.messages || chat.messages.length === 0) {
+    box.innerHTML = `<div class="empty-state">${chat.note || "暂无消息"}</div>`;
+    updateQuoteBanner();
+    return;
+  }
+  box.innerHTML = chat.messages
+    .map((m, i) => {
+      const cls = m.sender === "ME" ? "me" : "other";
+      const picked = isPicked(m) ? " picked" : "";
+      const who = m.sender_name || (m.sender === "ME" ? "Me" : "未知");
+      let quote = "";
+      if (m.quote_text) {
+        const qWho = m.quote_sender || "未知";
+        quote = `<div class="quote">回复 ${escapeHtml(qWho)}：${escapeHtml(m.quote_text)}</div>`;
+      }
+      return `<div class="bubble ${cls}${picked}" data-idx="${i}"><span class="who">${escapeHtml(who)}</span>${quote}${escapeHtml(m.text)}</div>`;
+    })
+    .join("");
+  box.querySelectorAll(".bubble").forEach((el) => {
+    el.addEventListener("click", () => {
+      const idx = Number(el.dataset.idx);
+      const msg = chat.messages[idx];
+      if (!msg) return;
+      state.quote = isPicked(msg) ? null : msg;
+      renderMessages(chat);
+      box.scrollTop = box.scrollHeight;
+    });
+  });
+  box.scrollTop = box.scrollHeight;
+  updateQuoteBanner();
+}
+
+function escapeHtml(text) {
+  return String(text)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+function renderSuggestions(items, chatName) {
+  const box = $("suggestions");
+  if (!items?.length) {
+    box.classList.add("empty-state");
+    box.textContent = "没有生成出建议。";
+    return;
+  }
+  box.classList.remove("empty-state");
+  box.innerHTML = items
+    .map((item, i) => {
+      return `
+        <article class="card" data-index="${i}">
+          <span class="tone">${escapeHtml(item.tone || "建议")}</span>
+          <textarea>${escapeHtml(item.text)}</textarea>
+          <div class="card-actions">
+            <button class="primary send" type="button" data-enter="1">发送到微信</button>
+            <button class="ghost fill" type="button" data-enter="0">只填入输入框</button>
+          </div>
+        </article>`;
+    })
+    .join("");
+  box.querySelectorAll("button").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const card = btn.closest(".card");
+      const text = card.querySelector("textarea").value.trim();
+      const pressEnter = btn.dataset.enter === "1";
+      if (!text) return;
+      if (pressEnter) {
+        const quoting = state.suggestQuote || state.quote;
+        const extra = quoting ? "\n并在微信中引用所选消息。" : "";
+        const ok = window.confirm(`将把下面这条发送到「${chatName}」：\n\n${text}${extra}\n\n确定？助手不会自动连发。`);
+        if (!ok) return;
+      }
+      $("action-note").textContent = pressEnter ? "正在发送…" : "正在填入输入框…";
+      try {
+        const result = await api("/api/send", {
+          method: "POST",
+          body: JSON.stringify({
+            text,
+            chat_name: chatName,
+            press_enter: pressEnter,
+            quote: state.suggestQuote || state.quote || null,
+          }),
+        });
+        $("action-note").textContent = result.sent
+          ? (result.quoted ? "已引用所选消息并发出。" : "已通过微信官方客户端发出。")
+          : result.warning || "已写入输入框，请你在微信里确认后按回车。";
+      } catch (err) {
+        $("action-note").textContent = err.message;
+      }
+    });
+  });
+}
+
+async function refreshStatus() {
+  try {
+    const s = await api("/api/status");
+    state.status = s;
+    setPill("pill-ax", s.ax_trusted, "辅助功能", "辅助功能已开", "需要 Python 权限");
+    setPill("pill-wechat", s.wechat_running, "微信", "微信运行中", "微信未打开");
+    setPill("pill-ai", s.has_api_key, "AI", "AI 已配置", "未配置 API");
+    return s;
+  } catch (err) {
+    setPill("pill-ax", false, "", "", "服务未连接");
+    return null;
+  }
+}
+
+async function refreshChat() {
+  const chat = await api("/api/chat/current");
+  state.chat = chat;
+  renderMessages(chat);
+}
+
+async function generate() {
+  $("btn-suggest").disabled = true;
+  state.suggestQuote = state.quote;
+  $("action-note").textContent = state.quote
+    ? "正在按你选中的消息生成引用回复…"
+    : "正在根据当前聊天生成建议…聊天内容只发往你配置的 AI 接口。";
+  try {
+    const data = await api("/api/suggest", {
+      method: "POST",
+      body: JSON.stringify({ quote: state.quote }),
+    });
+    renderSuggestions(data.suggestions, data.chat_name);
+    $("action-note").textContent = data.quoted
+      ? `已按引用生成 ${data.suggestions.length} 条。发送时会在微信里引用该消息。`
+      : `已为「${data.chat_name}」生成 ${data.suggestions.length} 条。`;
+  } catch (err) {
+    $("action-note").textContent = err.message;
+  } finally {
+    $("btn-suggest").disabled = false;
+  }
+}
+
+function fillForm(settings) {
+  const form = $("settings-form");
+  for (const [key, value] of Object.entries(settings)) {
+    const field = form.elements[key];
+    if (!field) continue;
+    if (field.type === "checkbox") field.checked = Boolean(value);
+    else field.value = value ?? "";
+  }
+}
+
+async function openSettings() {
+  const settings = await api("/api/settings");
+  fillForm(settings);
+  $("settings-mask").classList.remove("hidden");
+}
+
+function closeSettings() {
+  $("settings-mask").classList.add("hidden");
+}
+
+$("btn-refresh").addEventListener("click", () => refreshChat().catch((e) => {
+  $("chat-note").textContent = e.message;
+}));
+$("btn-permission").addEventListener("click", async () => {
+  try {
+    const result = await api("/api/permission", { method: "POST" });
+    $("chat-note").textContent = result.ax_trusted
+      ? "辅助功能已授权。"
+      : result.hint || "请把 Python 加进辅助功能后再重启助手。";
+    await refreshStatus();
+    await refreshChat();
+  } catch (err) {
+    $("chat-note").textContent = err.message;
+  }
+});
+$("btn-ax-settings").addEventListener("click", async () => {
+  try {
+    await api("/api/permission/open-settings", { method: "POST" });
+    const target = state.status?.ax_target;
+    $("chat-note").textContent = target
+      ? `已尝试打开系统设置。请点「+」添加：\n${target}\n打开开关后重启本助手。`
+      : "已尝试打开系统设置。请添加 Python，而不是只勾选 Cursor。";
+  } catch (err) {
+    $("chat-note").textContent = err.message;
+  }
+});
+const PROVIDER_PRESETS = {
+  gemini: {
+    api_base: "",
+    model: "gemini-3.6-flash",
+  },
+  openai: {
+    api_base: "",
+    model: "gpt-4o-mini",
+  },
+  anthropic: {
+    api_base: "",
+    model: "claude-3-5-sonnet-latest",
+  },
+  ollama: {
+    api_base: "http://127.0.0.1:11434/v1",
+    model: "llama3.1",
+  },
+  custom: {
+    api_base: "",
+    model: "",
+  },
+};
+
+$("provider").addEventListener("change", (e) => {
+  const preset = PROVIDER_PRESETS[e.target.value];
+  if (!preset) return;
+  const form = $("settings-form");
+  const currentModel = form.model.value.trim();
+  const looksDefault =
+    !currentModel ||
+    /^(gpt-4o-mini|gemini-2\.5-flash|gemini-3\.6-flash|claude-3-5-sonnet-latest|llama3\.1)$/.test(currentModel);
+  if (looksDefault && preset.model) form.model.value = preset.model;
+  if (!form.api_base.value.trim() && preset.api_base) form.api_base.value = preset.api_base;
+});
+$("btn-suggest").addEventListener("click", generate);
+$("btn-clear-quote").addEventListener("click", () => {
+  state.quote = null;
+  state.suggestQuote = null;
+  if (state.chat) renderMessages(state.chat);
+  else updateQuoteBanner();
+});
+$("btn-settings").addEventListener("click", () => openSettings().catch((e) => alert(e.message)));
+$("btn-close-settings").addEventListener("click", closeSettings);
+$("settings-mask").addEventListener("click", (e) => {
+  if (e.target.id === "settings-mask") closeSettings();
+});
+$("settings-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const form = e.currentTarget;
+  const body = {
+    provider: form.provider.value,
+    api_key: form.api_key.value,
+    api_base: form.api_base.value,
+    model: form.model.value,
+    n_suggestions: Number(form.n_suggestions.value),
+    context_messages: Number(form.context_messages.value),
+    system_style: form.system_style.value,
+    anonymize_names: form.anonymize_names.checked,
+    include_chat_name: form.include_chat_name.checked,
+    send_mode: form.send_mode.value,
+    min_send_interval_seconds: Number(form.min_send_interval_seconds.value),
+    max_sends_per_hour: Number(form.max_sends_per_hour.value),
+  };
+  await api("/api/settings", { method: "PUT", body: JSON.stringify(body) });
+  closeSettings();
+  refreshStatus();
+  $("action-note").textContent = "设置已保存到本机。";
+});
+
+async function loop() {
+  await refreshStatus();
+  try {
+    await refreshChat();
+  } catch (err) {
+    $("chat-note").textContent = err.message;
+  }
+  setTimeout(loop, 4000);
+}
+
+loop();

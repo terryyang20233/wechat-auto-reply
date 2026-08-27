@@ -1,0 +1,33 @@
+[project]
+name = "wechat-assist"
+version = "0.1.0"
+description = "本机微信 AI 回复参考助手（macOS）"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.32.0",
+  "httpx>=0.27.0",
+  "pydantic>=2.9.0",
+  "pydantic-settings>=2.6.0",
+]
+
+[project.optional-dependencies]
+macos = [
+  "pyobjc-framework-Cocoa>=10.0",
+  "pyobjc-framework-ApplicationServices>=10.0",
+  "pyobjc-framework-Quartz>=10.0",
+]
+
+[project.scripts]
+wechat-assist = "wechat_assist.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+wechat_assist = ["web/*"]

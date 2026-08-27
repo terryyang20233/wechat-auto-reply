@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>微信回复助手</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="brand">
+          <span class="logo" aria-hidden="true"></span>
+          <div>
+            <h1>微信回复助手</h1>
+            <p>本机读取 · AI 给选项 · 你点了才发送</p>
+          </div>
+        </div>
+        <div class="status-row">
+          <span id="pill-ax" class="pill">辅助功能</span>
+          <span id="pill-wechat" class="pill">微信</span>
+          <span id="pill-ai" class="pill">AI</span>
+          <button id="btn-settings" class="ghost" type="button">设置</button>
+        </div>
+      </header>
+
+      <main class="layout">
+        <section class="panel chat-panel">
+          <div class="panel-head">
+            <div>
+              <h2 id="chat-name">等待读取当前聊天</h2>
+              <p id="chat-note" class="muted">请打开微信，点进一个会话。</p>
+            </div>
+            <div class="status-row">
+              <button id="btn-refresh" class="ghost" type="button">刷新</button>
+              <button id="btn-permission" class="ghost" type="button">弹出授权</button>
+              <button id="btn-ax-settings" class="ghost" type="button">打开系统设置</button>
+            </div>
+          </div>
+          <div id="messages" class="messages"></div>
+        </section>
+
+        <section class="panel suggest-panel">
+          <div class="panel-head">
+            <div>
+              <h2>回复备选</h2>
+              <p class="muted">先点左侧一条消息可选「引用」，再生成；不会自动发出。</p>
+            </div>
+            <div class="status-row">
+              <button id="btn-clear-quote" class="ghost" type="button">取消引用</button>
+              <button id="btn-suggest" class="primary" type="button">生成建议</button>
+            </div>
+          </div>
+          <p id="quote-banner" class="muted action-note"></p>
+          <div id="suggestions" class="suggestions empty-state">
+            还没有建议。读取到聊天后点「生成建议」。
+          </div>
+          <p id="action-note" class="muted action-note"></p>
+        </section>
+      </main>
+    </div>
+
+    <div id="settings-mask" class="mask hidden" role="dialog" aria-modal="true">
+      <form id="settings-form" class="sheet">
+        <div class="sheet-head">
+          <h2>本机设置</h2>
+          <button id="btn-close-settings" class="ghost" type="button">关闭</button>
+        </div>
+        <p class="muted">API Key 只写在你电脑的 <code>~/.wechat-assist/settings.json</code>，权限 600。聊天内容默认匿名化后再发给你自己的模型。</p>
+
+        <label>AI 提供商
+          <select name="provider" id="provider">
+            <option value="gemini">Google Gemini</option>
+            <option value="openai">OpenAI 兼容（OpenAI / DeepSeek / 通义等）</option>
+            <option value="anthropic">Anthropic</option>
+            <option value="ollama">Ollama（完全本机，推荐隐私优先）</option>
+            <option value="custom">自定义 OpenAI 兼容接口</option>
+          </select>
+        </label>
+        <label>API Key
+          <input name="api_key" type="password" autocomplete="off" placeholder="Gemini 为 AIza…；OpenAI 为 sk-…" />
+        </label>
+        <label>API Base（可空）
+          <input name="api_base" type="text" placeholder="Gemini 可留空，或填 https://generativelanguage.googleapis.com/v1beta" />
+        </label>
+        <label>模型
+          <input name="model" type="text" placeholder="gemini-3.6-flash / gpt-4o-mini / claude-3-5-sonnet-latest" />
+        </label>
+        <div class="grid-2">
+          <label>建议条数
+            <input name="n_suggestions" type="number" min="1" max="6" />
+          </label>
+          <label>上下文条数
+            <input name="context_messages" type="number" min="4" max="80" />
+          </label>
+        </div>
+        <label>回复风格补充
+          <textarea name="system_style" rows="2"></textarea>
+        </label>
+        <label class="check"><input name="anonymize_names" type="checkbox" /> 发给 AI 时隐藏真实姓名（推荐）</label>
+        <label class="check"><input name="include_chat_name" type="checkbox" /> 把会话名称也发给 AI（一般不需要）</label>
+        <label>发送方式
+          <select name="send_mode">
+            <option value="fill_and_send">填入并发送（仍需你点击）</option>
+            <option value="fill_only">只填入输入框，由你按回车（更稳妥）</option>
+          </select>
+        </label>
+        <div class="grid-2">
+          <label>两次发送最短间隔（秒）
+            <input name="min_send_interval_seconds" type="number" min="2" max="120" step="0.5" />
+          </label>
+          <label>每小时最多发送
+            <input name="max_sends_per_hour" type="number" min="1" max="80" />
+          </label>
+        </div>
+        <div class="sheet-actions">
+          <button class="primary" type="submit">保存</button>
+        </div>
+      </form>
+    </div>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
