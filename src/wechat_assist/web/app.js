@@ -5,6 +5,7 @@ const state = {
   polling: true,
   status: null,
   quote: null,
+  quoteChat: "",
   suggestQuote: null,
   replyTone: "natural",
 };
@@ -45,9 +46,43 @@ function isPicked(m) {
   return state.quote && quoteKey(state.quote) === quoteKey(m);
 }
 
+function chatKey(name) {
+  return String(name || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function clearQuote() {
+  state.quote = null;
+  state.quoteChat = "";
+  state.suggestQuote = null;
+  updateQuoteBanner();
+}
+
+function syncQuoteButton() {
+  const btn = $("btn-clear-quote");
+  const on = Boolean(state.quote);
+  btn.hidden = !on;
+  btn.classList.toggle("hidden", !on);
+}
+
+function dropQuoteIfChatChanged(chat) {
+  const incoming = chatKey(chat.chat_name);
+  if (!incoming) return;
+  const previous = chatKey(state.chat?.chat_name);
+  const bound = chatKey(state.quoteChat);
+  const from = bound || previous;
+  if ((state.quote || state.suggestQuote) && from && from !== incoming) {
+    clearQuote();
+    return;
+  }
+  if (state.quote && !bound) {
+    state.quoteChat = chat.chat_name;
+  }
+}
+
 function updateQuoteBanner() {
   const banner = $("quote-banner");
   const q = state.quote;
+  syncQuoteButton();
   if (!q) {
     banner.textContent = "点左侧一条消息，可针对它生成建议，发送时也会在微信里引用。";
     return;
@@ -85,6 +120,8 @@ function renderMessages(chat) {
       const msg = chat.messages[idx];
       if (!msg) return;
       state.quote = isPicked(msg) ? null : msg;
+      state.quoteChat = state.quote ? (chat.chat_name || "") : "";
+      if (!state.quote) state.suggestQuote = null;
       renderMessages(chat);
       box.scrollTop = box.scrollHeight;
     });
@@ -101,6 +138,13 @@ function escapeHtml(text) {
     .replaceAll('"', "&quot;");
 }
 
+function suggestionBubbles(item) {
+  const fromList = (item.messages || []).map((m) => String(m || "").trim()).filter(Boolean);
+  if (fromList.length) return fromList;
+  const text = String(item.text || "").trim();
+  return text ? [text] : [];
+}
+
 function renderSuggestions(items, chatName) {
   const box = $("suggestions");
   if (!items?.length) {
@@ -111,10 +155,18 @@ function renderSuggestions(items, chatName) {
   box.classList.remove("empty-state");
   box.innerHTML = items
     .map((item, i) => {
+      const bubbles = suggestionBubbles(item);
+      const count = bubbles.length > 1 ? ` · ${bubbles.length}条` : "";
+      const fields = bubbles
+        .map((text, bi) => {
+          const label = bubbles.length > 1 ? `<span>第 ${bi + 1} 条</span>` : "";
+          return `<label class="bubble-edit">${label}<textarea data-bubble="${bi}">${escapeHtml(text)}</textarea></label>`;
+        })
+        .join("");
       return `
         <article class="card" data-index="${i}">
-          <span class="tone">${escapeHtml(item.tone || "建议")}</span>
-          <textarea>${escapeHtml(item.text)}</textarea>
+          <span class="tone">${escapeHtml(item.tone || "建议")}${count}</span>
+          ${fields}
           <div class="card-actions">
             <button class="primary send" type="button" data-enter="1">发送到微信</button>
             <button class="ghost fill" type="button" data-enter="0">只填入输入框</button>
@@ -125,29 +177,44 @@ function renderSuggestions(items, chatName) {
   box.querySelectorAll("button").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const card = btn.closest(".card");
-      const text = card.querySelector("textarea").value.trim();
+      const messages = [...card.querySelectorAll("textarea")]
+        .map((el) => el.value.trim())
+        .filter(Boolean);
       const pressEnter = btn.dataset.enter === "1";
-      if (!text) return;
+      if (!messages.length) return;
       if (pressEnter) {
         const quoting = state.suggestQuote || state.quote;
-        const extra = quoting ? "\n并在微信中引用所选消息。" : "";
-        const ok = window.confirm(`将把下面这条发送到「${chatName}」：\n\n${text}${extra}\n\n确定？助手不会自动连发。`);
+        const extra = quoting ? "\n第一句会先在微信里引用所选消息。" : "";
+        const preview = messages.map((m, i) => (messages.length > 1 ? `${i + 1}. ${m}` : m)).join("\n\n");
+        const ok = window.confirm(
+          `将把下面 ${messages.length} 条依次发送到「${chatName}」：\n\n${preview}${extra}\n\n确定？助手不会自动连发下一轮。`
+        );
         if (!ok) return;
       }
-      $("action-note").textContent = pressEnter ? "正在发送…" : "正在填入输入框…";
+      $("action-note").textContent = pressEnter
+        ? (messages.length > 1 ? `正在依次发送 ${messages.length} 条…` : "正在发送…")
+        : "正在填入输入框…";
       try {
         const result = await api("/api/send", {
           method: "POST",
           body: JSON.stringify({
-            text,
+            text: messages.join("\n"),
+            messages,
             chat_name: chatName,
             press_enter: pressEnter,
             quote: state.suggestQuote || state.quote || null,
           }),
         });
-        $("action-note").textContent = result.sent
-          ? (result.quoted ? "已引用所选消息并发出。" : "已通过微信官方客户端发出。")
-          : result.warning || "已写入输入框，请你在微信里确认后按回车。";
+        if (result.warning) {
+          $("action-note").textContent = result.warning;
+        } else if (result.sent) {
+          const n = result.sent_count || messages.length;
+          $("action-note").textContent = result.quoted
+            ? `已引用所选消息，并依次发出 ${n} 条。`
+            : (n > 1 ? `已依次通过微信官方客户端发出 ${n} 条。` : "已通过微信官方客户端发出。");
+        } else {
+          $("action-note").textContent = "已写入输入框，请你在微信里确认后按回车。";
+        }
       } catch (err) {
         $("action-note").textContent = err.message;
       }
@@ -175,6 +242,7 @@ async function refreshStatus() {
 
 async function refreshChat() {
   const chat = await api("/api/chat/current");
+  dropQuoteIfChatChanged(chat);
   state.chat = chat;
   renderMessages(chat);
 }
@@ -182,18 +250,26 @@ async function refreshChat() {
 async function generate() {
   $("btn-suggest").disabled = true;
   state.suggestQuote = state.quote;
-  $("action-note").textContent = state.quote
-    ? "正在按你选中的消息生成引用回复…"
-    : "正在根据当前聊天生成建议…聊天内容只发往你配置的 AI 接口。";
+  const intent = ($("user-intent").value || "").trim();
+  $("action-note").textContent = intent
+    ? "正在按你想说的结合当前聊天生成建议…"
+    : state.quote
+      ? "正在按你选中的消息生成引用回复…"
+      : "正在根据当前聊天生成建议…聊天内容只发往你配置的 AI 接口。";
   try {
     const data = await api("/api/suggest", {
       method: "POST",
-      body: JSON.stringify({ quote: state.quote, tone: $("reply-tone").value }),
+      body: JSON.stringify({
+        quote: state.quote,
+        tone: $("reply-tone").value,
+        intent,
+      }),
     });
     renderSuggestions(data.suggestions, data.chat_name);
-    $("action-note").textContent = data.quoted
-      ? `已按引用生成 ${data.suggestions.length} 条。发送时会在微信里引用该消息。`
-      : `已为「${data.chat_name}」生成 ${data.suggestions.length} 条。`;
+    const bits = [`已为「${data.chat_name}」生成 ${data.suggestions.length} 套备选`];
+    if (data.used_intent) bits.push("已结合你想说的");
+    if (data.quoted) bits.push("发送时会在微信里引用所选消息");
+    $("action-note").textContent = bits.join("。") + "。";
   } catch (err) {
     $("action-note").textContent = err.message;
   } finally {
@@ -295,10 +371,8 @@ $("reply-tone").addEventListener("change", async (e) => {
   }
 });
 $("btn-clear-quote").addEventListener("click", () => {
-  state.quote = null;
-  state.suggestQuote = null;
+  clearQuote();
   if (state.chat) renderMessages(state.chat);
-  else updateQuoteBanner();
 });
 $("btn-settings").addEventListener("click", () => openSettings().catch((e) => alert(e.message)));
 $("btn-close-settings").addEventListener("click", closeSettings);

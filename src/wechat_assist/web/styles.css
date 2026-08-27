@@ -162,6 +162,16 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   min-height: 72px;
   background: var(--paper);
 }
+.card .bubble-edit {
+  margin-bottom: 8px;
+}
+.card .bubble-edit span {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.card .bubble-edit textarea { min-height: 52px; }
 .card-actions { display: flex; gap: 8px; margin-top: 8px; }
 .action-note { padding: 0 18px 16px; min-height: 1.4em; }
 
@@ -181,6 +191,25 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   color: var(--ink);
 }
 
+.intent-box {
+  display: block;
+  padding: 10px 18px 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+.intent-box textarea {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  resize: vertical;
+  min-height: 64px;
+  color: var(--ink);
+  background: #fff;
+}
+
 .mask {
   position: fixed; inset: 0;
   background: rgba(28, 25, 21, 0.28);
@@ -188,7 +217,7 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   place-items: center;
   padding: 20px;
 }
-.mask.hidden { display: none; }
+.mask.hidden, .hidden, [hidden] { display: none !important; }
 .sheet {
   width: min(640px, 100%);
   max-height: 90vh;

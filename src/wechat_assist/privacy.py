@@ -86,6 +86,12 @@ def anonymize_messages(
     return out
 
 
+def scrub_user_note(text: str, messages: Iterable[dict]) -> str:
+    """Anonymize a user-provided intent note with the same name map as the chat."""
+    aliases = _alias_map(messages)
+    return _scrub_names((text or "").strip(), aliases)
+
+
 def describe_quote_for_model(quote: dict, context: list[dict]) -> str:
     aliases = _alias_map(list(context) + [quote])
     label = _label_for(str(quote.get("sender_name") or ""), str(quote.get("sender") or ""), aliases)

@@ -7,10 +7,18 @@ from typing import Any
 import httpx
 
 from wechat_assist.config import AppSettings, ReplyTone
-from wechat_assist.privacy import anonymize_messages, build_transcript, describe_quote_for_model, redact_text
+from wechat_assist.privacy import (
+    anonymize_messages,
+    build_transcript,
+    describe_quote_for_model,
+    redact_text,
+    scrub_user_note,
+)
+
+MAX_BUBBLES = 3
 
 SYSTEM_PROMPT = """你是用户本人的微信回复参考助手，不是自动机器人。
-根据给定的聊天上下文，为用户起草若干条「可以直接发出去」的回复备选。
+根据给定的聊天上下文，为用户起草若干套「可以直接发出去」的回复备选。
 
 硬性要求：
 - 严格模仿真人微信：口语、短句、符合上下文语气
@@ -20,13 +28,17 @@ SYSTEM_PROMPT = """你是用户本人的微信回复参考助手，不是自动�
 - 不要过度热情或过度使用表情；仅在对方也在用表情时偶尔带一个
 - 若某条带有「回复[我/对方/成员N]『…』」，说明它是针对那条被引用消息发出的；建议也要能接得上，但不要把引用原文整段复述进去
 - 如果用户指定了「请引用某条消息来回复」，建议必须针对那条被引用内容，不要写成在回整段聊天里的另一句
-- 只输出 JSON，格式如下：
-{"suggestions":[{"tone":"简洁","text":"..."},{"tone":"友好","text":"..."},{"tone":"认真","text":"..."}]}
+- 若提供了「用户想说的」，必须把这些要点写进回复：结合上下文改成自然微信口吻，不要漏掉关键信息；不要像备忘录那样逐条编号；不要添加用户没写的事实、时间或承诺
+- 每一套备选是一次回复，用 messages 字符串数组表示将要连续发出的微信气泡。长度可以是 1，也可以是 2 或 3
+- 真人微信常把两件独立的事拆成两条（先应一声，再补一句；答应一件事，再问另一句）。这种该拆。不要把一个完整短句切成碎片
+- 分开发气泡不是写编号清单：每条都是能单独发出去的口语
+- 只输出 JSON。多条时 messages 必须有多个元素，不要把几句话塞进同一个字符串：
+{"suggestions":[{"tone":"自然","messages":["行啊","那你定个点我看"]},{"tone":"自然","messages":["今晚我去不了了"]}]}
 """
 
 TONE_GUIDES: dict[str, str] = {
     "natural": "自然口语：像真人微信，短句、不书面、不客服腔。",
-    "concise": "简洁：尽量一两句说完，不铺垫、不重复。",
+    "concise": "简洁：每条气泡尽量短；可以拆成两条很短的，不必全挤在一句里。",
     "friendly": "友好轻松：语气亲近，但不油腻、不堆表情。",
     "professional": "得体克制：适合工作或不太熟的人，礼貌、清楚、不卖萌。",
     "warm": "温柔关心：体贴、软一点，但仍像聊天而不是鸡汤。",
@@ -58,7 +70,7 @@ def test_connection(settings: AppSettings) -> dict[str, Any]:
     """Send a tiny dummy prompt. Does not include WeChat messages."""
     raw = _complete(
         settings,
-        '只输出 JSON：{"suggestions":[{"tone":"测试","text":"pong"}]}',
+        '只输出 JSON：{"suggestions":[{"tone":"测试","messages":["pong"]}]}',
     )
     items = _parse_suggestions(raw, 1)
     sample = items[0]["text"] if items else raw[:80]
@@ -75,7 +87,8 @@ def suggest_replies(
     chat_name: str,
     messages: list[dict],
     quote: dict | None = None,
-) -> list[dict[str, str]]:
+    user_intent: str | None = None,
+) -> list[dict]:
     if not messages:
         raise ValueError("当前没有可读的聊天上下文。")
 
@@ -95,24 +108,48 @@ def suggest_replies(
     extra = ""
     if quote and (quote.get("text") or "").strip():
         quoted = describe_quote_for_model(quote, messages[-settings.context_messages :])
-        extra = (
+        extra += (
             "用户指定要在微信里引用下面这条消息来回复，请专门针对它写建议：\n"
             f"{quoted}\n\n"
+        )
+    intent = (user_intent or "").strip()
+    if intent:
+        alias_source = list(messages[-settings.context_messages :])
+        if quote:
+            alias_source.append(quote)
+        safe_intent = scrub_user_note(intent, alias_source)
+        extra += (
+            "用户想说的（请结合上下文改成自然回复，必须覆盖这些要点，不要逐条复述、不要添油加醋）：\n"
+            f"{safe_intent}\n\n"
         )
     tone = normalize_tone(settings.reply_tone)
     style_bits = [f"语气要求：{TONE_GUIDES[tone]}"]
     if tone != "varied":
         style_bits.append(
-            f"这 {settings.n_suggestions} 条都保持同一语气；JSON 里 tone 字段统一写成「{TONE_LABELS[tone]}」。"
+            f"这 {settings.n_suggestions} 套备选都保持同一语气；JSON 里 tone 字段统一写成「{TONE_LABELS[tone]}」。"
         )
     custom = (settings.system_style or "").strip()
     if custom:
         style_bits.append(f"用户额外风格说明：{custom}")
+    count_hint = (
+        f"请给出 {settings.n_suggestions} 套回复备选。"
+        f"每套 messages 长度 1～{MAX_BUBBLES}。"
+    )
+    if settings.n_suggestions >= 2:
+        count_hint += (
+            f"其中至少 1 套 messages 只有 1 条，至少 1 套 messages 有 2 或 3 条"
+            "（两件独立的事、先回应再补充、或「用户想说的」里有多个要点时，优先拆开）。"
+        )
+    elif intent:
+        count_hint += "若「用户想说的」含两个以上要点，这套请拆成 2 或 3 条气泡。"
+    else:
+        count_hint += "若上下文里其实有两件独立的事，请拆成 2 条；只有一句就保持 1 条。"
     user_prompt = (
         "\n".join(style_bits)
         + "\n\n"
         + extra
-        + f"请给出 {settings.n_suggestions} 条回复备选。\n\n"
+        + count_hint
+        + "\n\n"
         + f"聊天记录：\n{transcript}"
     )
     raw = _complete(settings, user_prompt)
@@ -274,7 +311,7 @@ def _complete_anthropic(settings: AppSettings, user_prompt: str) -> str:
     }
     payload = {
         "model": settings.model or "claude-3-5-sonnet-latest",
-        "max_tokens": 800,
+        "max_tokens": 1200,
         "system": SYSTEM_PROMPT,
         "messages": [{"role": "user", "content": user_prompt}],
     }
@@ -289,7 +326,34 @@ def _complete_anthropic(settings: AppSettings, user_prompt: str) -> str:
     return text
 
 
-def _parse_suggestions(raw: str, n: int) -> list[dict[str, str]]:
+def _normalize_bubbles(item: Any) -> list[str]:
+    raw_parts: list[str] = []
+    if isinstance(item, str):
+        raw_parts = [item]
+    elif isinstance(item, dict):
+        msgs = item.get("messages")
+        if isinstance(msgs, str):
+            raw_parts = [p for p in re.split(r"\n+", msgs) if p.strip()]
+        elif isinstance(msgs, list):
+            raw_parts = []
+            for part in msgs:
+                if isinstance(part, list):
+                    raw_parts.extend(str(x) for x in part)
+                else:
+                    raw_parts.append(str(part))
+        if not raw_parts:
+            body = str(item.get("text") or item.get("reply") or "")
+            if body.strip():
+                raw_parts = [p for p in re.split(r"\n\n+", body) if p.strip()] or [body]
+    bubbles = [redact_text(part.strip()) for part in raw_parts if str(part).strip()]
+    return bubbles[:MAX_BUBBLES]
+
+
+def _pack_suggestion(tone: str, bubbles: list[str]) -> dict:
+    return {"tone": tone, "messages": bubbles, "text": "\n".join(bubbles)}
+
+
+def _parse_suggestions(raw: str, n: int) -> list[dict]:
     text = raw.strip()
     match = re.search(r"\{[\s\S]*\}", text)
     if match:
@@ -297,22 +361,22 @@ def _parse_suggestions(raw: str, n: int) -> list[dict[str, str]]:
     try:
         data = json.loads(text)
         items = data.get("suggestions") or data.get("replies") or []
-        out: list[dict[str, str]] = []
+        out: list[dict] = []
         for item in items:
-            if isinstance(item, str):
-                out.append({"tone": "建议", "text": redact_text(item.strip())})
-            elif isinstance(item, dict):
-                body = str(item.get("text") or item.get("reply") or "").strip()
-                tone = str(item.get("tone") or item.get("style") or "建议").strip()
-                if body:
-                    out.append({"tone": tone, "text": redact_text(body)})
+            bubbles = _normalize_bubbles(item)
+            if not bubbles:
+                continue
+            tone = "建议"
+            if isinstance(item, dict):
+                tone = str(item.get("tone") or item.get("style") or "建议").strip() or "建议"
+            out.append(_pack_suggestion(tone, bubbles))
         if out:
             return out[:n]
     except json.JSONDecodeError:
         pass
 
     lines = [ln.strip(" -•\t") for ln in raw.splitlines() if ln.strip()]
-    fallback = [{"tone": "建议", "text": redact_text(ln)} for ln in lines if ln]
+    fallback = [_pack_suggestion("建议", [redact_text(ln)]) for ln in lines if ln]
     if not fallback:
         raise ValueError("AI 没有给出可用的回复。")
     return fallback[:n]

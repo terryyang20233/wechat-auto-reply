@@ -44,10 +44,10 @@
           <div class="panel-head">
             <div>
               <h2>回复备选</h2>
-              <p class="muted">先点左侧一条消息可选「引用」，再生成；不会自动发出。</p>
+              <p class="muted">可先写「我想说的」。生成可能是 1 条，也可能拆成几条气泡；点了才会发。</p>
             </div>
             <div class="status-row">
-              <button id="btn-clear-quote" class="ghost" type="button">取消引用</button>
+              <button id="btn-clear-quote" class="ghost hidden" type="button" hidden>取消引用</button>
               <button id="btn-suggest" class="primary" type="button">生成建议</button>
             </div>
           </div>
@@ -64,6 +64,9 @@
               <option value="varied">几种语气各一条</option>
             </select>
           </div>
+          <label class="intent-box" for="user-intent">我想说的（可选）
+            <textarea id="user-intent" rows="3" maxlength="800" placeholder="例如：今晚不去了，改明天；顺便问他具体几点。会结合左侧聊天写成自然回复。"></textarea>
+          </label>
           <p id="quote-banner" class="muted action-note"></p>
           <div id="suggestions" class="suggestions empty-state">
             还没有建议。读取到聊天后点「生成建议」。

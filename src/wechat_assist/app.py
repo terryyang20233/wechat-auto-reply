@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import random
+import time
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -8,7 +10,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from wechat_assist.ai.suggest import normalize_tone, suggest_replies, test_connection
+from wechat_assist.ai.suggest import MAX_BUBBLES, normalize_tone, suggest_replies, test_connection
 from wechat_assist.config import AppSettings, load_settings, save_settings
 from wechat_assist.safety import SendGuard
 from wechat_assist.wechat.ax import dump_tree, open_accessibility_settings
@@ -47,7 +49,8 @@ class QuoteBody(BaseModel):
 
 
 class SendBody(BaseModel):
-    text: str
+    text: str = ""
+    messages: list[str] | None = None
     chat_name: str
     press_enter: bool | None = None
     quote: QuoteBody | None = None
@@ -56,6 +59,7 @@ class SendBody(BaseModel):
 class SuggestBody(BaseModel):
     quote: QuoteBody | None = None
     tone: str | None = None
+    intent: str = Field(default="", max_length=800)
 
 
 @app.get("/api/health")
@@ -122,12 +126,14 @@ def suggest(body: SuggestBody = SuggestBody()) -> dict:
     quote = body.quote.model_dump() if body and body.quote and body.quote.text.strip() else None
     if body and body.tone:
         settings = settings.model_copy(update={"reply_tone": normalize_tone(body.tone)})
+    intent = (body.intent or "").strip() if body else ""
     try:
         items = suggest_replies(
             settings,
             snap.chat_name,
             [m.to_dict() for m in snap.messages],
             quote=quote,
+            user_intent=intent or None,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -138,32 +144,89 @@ def suggest(body: SuggestBody = SuggestBody()) -> dict:
         "messages": [m.to_dict() for m in snap.messages],
         "suggestions": items,
         "quoted": bool(quote),
+        "used_intent": bool(intent),
     }
+
+
+def _send_parts(body: SendBody) -> list[str]:
+    parts = [str(item).strip() for item in (body.messages or []) if str(item).strip()]
+    if not parts and (body.text or "").strip():
+        parts = [body.text.strip()]
+    return parts[:MAX_BUBBLES]
 
 
 @app.post("/api/send")
 def send(body: SendBody) -> dict:
     settings = load_settings()
+    parts = _send_parts(body)
+    if not parts:
+        raise HTTPException(400, "回复内容为空。")
     press_enter = settings.send_mode == "fill_and_send" if body.press_enter is None else body.press_enter
+    quote = body.quote.model_dump() if body.quote and body.quote.text.strip() else None
     if press_enter:
-        blocked = send_guard.check(settings.min_send_interval_seconds, settings.max_sends_per_hour)
+        blocked = send_guard.check(
+            settings.min_send_interval_seconds,
+            settings.max_sends_per_hour,
+            n_sends=len(parts),
+        )
         if blocked:
             raise HTTPException(429, blocked)
-    result = send_or_fill(
-        text=body.text,
-        expected_chat=body.chat_name,
-        press_enter=press_enter,
-        delay_min=settings.human_delay_min,
-        delay_max=settings.human_delay_max,
-        quote=body.quote.model_dump() if body.quote and body.quote.text.strip() else None,
-    )
-    if not result.ok:
-        raise HTTPException(400, result.error or "发送失败。")
-    if result.sent:
-        send_guard.mark_sent()
-    payload = result.to_dict()
-    if result.error:
-        payload["warning"] = result.error
+
+    sent_count = 0
+    quoted_any = False
+    last = None
+    for index, part in enumerate(parts):
+        if not press_enter and index > 0:
+            break
+        if press_enter and index > 0:
+            blocked = send_guard.check(
+                0,
+                settings.max_sends_per_hour,
+                n_sends=1,
+                enforce_interval=False,
+            )
+            if blocked:
+                payload = last.to_dict() if last else {}
+                payload["ok"] = True
+                payload["sent"] = sent_count > 0
+                payload["sent_count"] = sent_count
+                payload["total"] = len(parts)
+                payload["warning"] = f"已发出前 {sent_count} 条。{blocked}"
+                return payload
+        result = send_or_fill(
+            text=part,
+            expected_chat=body.chat_name,
+            press_enter=press_enter,
+            delay_min=settings.human_delay_min,
+            delay_max=settings.human_delay_max,
+            quote=quote if index == 0 else None,
+        )
+        last = result
+        if not result.ok:
+            if sent_count:
+                payload = result.to_dict()
+                payload["ok"] = True
+                payload["sent"] = True
+                payload["sent_count"] = sent_count
+                payload["total"] = len(parts)
+                payload["warning"] = f"已发出前 {sent_count} 条，后面停下：{result.error}"
+                return payload
+            raise HTTPException(400, result.error or "发送失败。")
+        quoted_any = quoted_any or result.quoted
+        if result.sent:
+            send_guard.mark_sent()
+            sent_count += 1
+            if index < len(parts) - 1:
+                time.sleep(random.uniform(0.45, 1.1))
+
+    payload = last.to_dict() if last else {}
+    payload["quoted"] = quoted_any
+    payload["sent_count"] = sent_count
+    payload["total"] = len(parts)
+    if last and last.error:
+        payload["warning"] = last.error
+    elif not press_enter and len(parts) > 1:
+        payload["warning"] = f"已填入第 1 条（共 {len(parts)} 条）。其余请你在微信里接着发，或改用「发送到微信」。"
     return payload
 
 
