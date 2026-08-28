@@ -7,8 +7,55 @@ const state = {
   quote: null,
   quoteChat: "",
   suggestQuote: null,
-  replyTone: "natural",
+  replyTone: "daily",
 };
+
+const TONE_META = {
+  daily: { mode: "daily", hint: "最正常的日常微信，像平时聊天，不策略、不装。" },
+  dating_tease: { mode: "dating", hint: "制造神秘感或无害的玩笑，若即若离。" },
+  dating_care: { mode: "dating", hint: "细腻关心，有温度但有边界，不显得舔狗。" },
+  dating_open: { mode: "dating", hint: "用开放式问题把话题接下去。" },
+  work_efficient: { mode: "work", hint: "直接给方案，或确认收到。" },
+  work_deflect: { mode: "work", hint: "高情商打太极，不伤和气地拒绝或推迟。" },
+  work_confirm: { mode: "work", hint: "稳妥的下级对上级回复，把选择权交回对方。" },
+  clash_sarcastic: { mode: "clash", hint: "不带脏字地怼回去，点到为止。" },
+  clash_distance: { mode: "clash", hint: "礼貌冷处理，把话题收住。" },
+};
+const TONE_MODE_DEFAULT = {
+  daily: "daily",
+  dating: "dating_tease",
+  work: "work_efficient",
+  clash: "clash_sarcastic",
+};
+
+const lastToneByMode = { ...TONE_MODE_DEFAULT };
+
+function applyToneUI(value) {
+  const tone = TONE_META[value] ? value : "daily";
+  const meta = TONE_META[tone];
+  state.replyTone = tone;
+  $("reply-tone").value = tone;
+  lastToneByMode[meta.mode] = tone;
+  document.querySelectorAll(".tone-mode").forEach((btn) => {
+    btn.classList.toggle("is-on", btn.dataset.mode === meta.mode);
+  });
+  document.querySelectorAll(".tone-choices").forEach((box) => {
+    box.hidden = box.dataset.mode !== meta.mode;
+  });
+  document.querySelectorAll("input[name='tone-opt']").forEach((input) => {
+    input.checked = input.value === tone;
+  });
+  $("tone-hint").textContent = meta.hint;
+}
+
+async function persistTone(value) {
+  applyToneUI(value);
+  try {
+    await api("/api/settings", { method: "PUT", body: JSON.stringify({ reply_tone: state.replyTone }) });
+  } catch (err) {
+    $("action-note").textContent = err.message;
+  }
+}
 
 function setPill(id, ok, warnText, okText, badText) {
   const el = $(id);
@@ -226,13 +273,10 @@ async function refreshStatus() {
   try {
     const s = await api("/api/status");
     state.status = s;
-    setPill("pill-ax", s.ax_trusted, "辅助功能", "辅助功能已开", "需要 Python 权限");
+    setPill("pill-ax", s.ax_trusted, "辅助功能", "辅助功能已开", "需要辅助功能权限");
     setPill("pill-wechat", s.wechat_running, "微信", "微信运行中", "微信未打开");
     setPill("pill-ai", s.has_api_key, "AI", "AI 已配置", "未配置 API");
-    if (s.reply_tone) {
-      state.replyTone = s.reply_tone;
-      $("reply-tone").value = s.reply_tone;
-    }
+    if (s.reply_tone) applyToneUI(s.reply_tone);
     return s;
   } catch (err) {
     setPill("pill-ax", false, "", "", "服务未连接");
@@ -266,6 +310,7 @@ async function generate() {
       }),
     });
     renderSuggestions(data.suggestions, data.chat_name);
+    $("user-intent").value = "";
     const bits = [`已为「${data.chat_name}」生成 ${data.suggestions.length} 套备选`];
     if (data.used_intent) bits.push("已结合你想说的");
     if (data.quoted) bits.push("发送时会在微信里引用所选消息");
@@ -285,10 +330,7 @@ function fillForm(settings) {
     if (field.type === "checkbox") field.checked = Boolean(value);
     else field.value = value ?? "";
   }
-  if (settings.reply_tone) {
-    state.replyTone = settings.reply_tone;
-    $("reply-tone").value = settings.reply_tone;
-  }
+  if (settings.reply_tone) applyToneUI(settings.reply_tone);
 }
 
 async function openSettings() {
@@ -309,7 +351,7 @@ $("btn-permission").addEventListener("click", async () => {
     const result = await api("/api/permission", { method: "POST" });
     $("chat-note").textContent = result.ax_trusted
       ? "辅助功能已授权。"
-      : result.hint || "请把 Python 加进辅助功能后再重启助手。";
+      : result.hint || "请把「微信回复助手」加进辅助功能后再重启助手。";
     await refreshStatus();
     await refreshChat();
   } catch (err) {
@@ -319,10 +361,10 @@ $("btn-permission").addEventListener("click", async () => {
 $("btn-ax-settings").addEventListener("click", async () => {
   try {
     await api("/api/permission/open-settings", { method: "POST" });
-    const target = state.status?.ax_target;
+    const target = state.status?.launcher_app || state.status?.ax_target;
     $("chat-note").textContent = target
-      ? `已尝试打开系统设置。请点「+」添加：\n${target}\n打开开关后重启本助手。`
-      : "已尝试打开系统设置。请添加 Python，而不是只勾选 Cursor。";
+      ? `已尝试打开系统设置。请打开「微信回复助手」（或添加）：\n${target}\n打开开关后完全退出助手再打开一次。`
+      : "已尝试打开系统设置。请勾选「微信回复助手」，只勾选 Cursor 在关掉 Cursor 后会失效。";
   } catch (err) {
     $("chat-note").textContent = err.message;
   }
@@ -362,13 +404,16 @@ $("provider").addEventListener("change", (e) => {
   if (!form.api_base.value.trim() && preset.api_base) form.api_base.value = preset.api_base;
 });
 $("btn-suggest").addEventListener("click", generate);
-$("reply-tone").addEventListener("change", async (e) => {
-  state.replyTone = e.target.value;
-  try {
-    await api("/api/settings", { method: "PUT", body: JSON.stringify({ reply_tone: state.replyTone }) });
-  } catch (err) {
-    $("action-note").textContent = err.message;
-  }
+document.querySelectorAll(".tone-mode").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const mode = btn.dataset.mode;
+    persistTone(lastToneByMode[mode] || TONE_MODE_DEFAULT[mode]);
+  });
+});
+document.querySelectorAll("input[name='tone-opt']").forEach((input) => {
+  input.addEventListener("change", () => {
+    if (input.checked) persistTone(input.value);
+  });
 });
 $("btn-clear-quote").addEventListener("click", () => {
   clearQuote();
@@ -398,8 +443,7 @@ $("settings-form").addEventListener("submit", async (e) => {
     max_sends_per_hour: Number(form.max_sends_per_hour.value),
   };
   await api("/api/settings", { method: "PUT", body: JSON.stringify(body) });
-  state.replyTone = body.reply_tone;
-  $("reply-tone").value = body.reply_tone;
+  applyToneUI(body.reply_tone);
   closeSettings();
   refreshStatus();
   $("action-note").textContent = "设置已保存到本机。";

@@ -10,8 +10,8 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from wechat_assist.ai.suggest import MAX_BUBBLES, normalize_tone, suggest_replies, test_connection
-from wechat_assist.config import AppSettings, load_settings, save_settings
+from wechat_assist.ai.suggest import MAX_BUBBLES, suggest_replies, test_connection
+from wechat_assist.config import AppSettings, load_settings, normalize_tone, save_settings
 from wechat_assist.safety import SendGuard
 from wechat_assist.wechat.ax import dump_tree, open_accessibility_settings
 from wechat_assist.wechat.reader import permission_status, read_current_chat, request_permission

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 CONFIG_DIR = Path.home() / ".wechat-assist"
 SETTINGS_PATH = CONFIG_DIR / "settings.json"
@@ -12,15 +12,36 @@ SETTINGS_PATH = CONFIG_DIR / "settings.json"
 ProviderName = Literal["openai", "anthropic", "gemini", "ollama", "custom"]
 SendMode = Literal["fill_only", "fill_and_send"]
 ReplyTone = Literal[
-    "natural",
-    "concise",
-    "friendly",
-    "professional",
-    "warm",
-    "humorous",
-    "firm",
-    "varied",
+    "daily",
+    "dating_tease",
+    "dating_care",
+    "dating_open",
+    "work_efficient",
+    "work_deflect",
+    "work_confirm",
+    "clash_sarcastic",
+    "clash_distance",
 ]
+
+_TONE_ALIASES: dict[str, ReplyTone] = {
+    "natural": "daily",
+    "concise": "daily",
+    "friendly": "daily",
+    "varied": "daily",
+    "professional": "work_efficient",
+    "warm": "dating_care",
+    "humorous": "dating_tease",
+    "firm": "clash_distance",
+}
+
+
+def normalize_tone(value: str | None) -> ReplyTone:
+    key = (value or "daily").strip().lower()
+    if key in _TONE_ALIASES:
+        return _TONE_ALIASES[key]
+    if key in get_args(ReplyTone):
+        return key  # type: ignore[return-value]
+    return "daily"
 
 
 class AppSettings(BaseModel):
@@ -32,13 +53,18 @@ class AppSettings(BaseModel):
     context_messages: int = Field(default=20, ge=4, le=80)
     anonymize_names: bool = True
     include_chat_name: bool = False
-    reply_tone: ReplyTone = "natural"
+    reply_tone: ReplyTone = "daily"
     system_style: str = ""
     send_mode: SendMode = "fill_and_send"
     min_send_interval_seconds: float = Field(default=8.0, ge=2.0, le=120.0)
     max_sends_per_hour: int = Field(default=20, ge=1, le=80)
     human_delay_min: float = Field(default=0.7, ge=0.2, le=5.0)
     human_delay_max: float = Field(default=1.8, ge=0.3, le=8.0)
+
+    @field_validator("reply_tone", mode="before")
+    @classmethod
+    def _coerce_reply_tone(cls, value: Any) -> str:
+        return normalize_tone(value if isinstance(value, str) else None)
 
     def masked(self) -> dict[str, Any]:
         data = self.model_dump()

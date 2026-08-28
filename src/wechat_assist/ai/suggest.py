@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx
 
-from wechat_assist.config import AppSettings, ReplyTone
+from wechat_assist.config import AppSettings, normalize_tone
 from wechat_assist.privacy import (
     anonymize_messages,
     build_transcript,
@@ -32,38 +32,66 @@ SYSTEM_PROMPT = """你是用户本人的微信回复参考助手，不是自动�
 - 每一套备选是一次回复，用 messages 字符串数组表示将要连续发出的微信气泡。长度可以是 1，也可以是 2 或 3
 - 真人微信常把两件独立的事拆成两条（先应一声，再补一句；答应一件事，再问另一句）。这种该拆。不要把一个完整短句切成碎片
 - 分开发气泡不是写编号清单：每条都是能单独发出去的口语
-- 只输出 JSON。多条时 messages 必须有多个元素，不要把几句话塞进同一个字符串：
-{"suggestions":[{"tone":"自然","messages":["行啊","那你定个点我看"]},{"tone":"自然","messages":["今晚我去不了了"]}]}
+- 只输出一个 JSON 对象，不要 markdown 代码块，不要在后面再追加第二个 JSON 或数组。多条时 messages 必须有多个元素，不要把几句话塞进同一个字符串：
+{"suggestions":[{"tone":"日常","messages":["行啊","那你定个点我看"]},{"tone":"日常","messages":["今晚我去不了了"]}]}
 """
 
 TONE_GUIDES: dict[str, str] = {
-    "natural": "自然口语：像真人微信，短句、不书面、不客服腔。",
-    "concise": "简洁：每条气泡尽量短；可以拆成两条很短的，不必全挤在一句里。",
-    "friendly": "友好轻松：语气亲近，但不油腻、不堆表情。",
-    "professional": "得体克制：适合工作或不太熟的人，礼貌、清楚、不卖萌。",
-    "warm": "温柔关心：体贴、软一点，但仍像聊天而不是鸡汤。",
-    "humorous": "轻松幽默：可以轻微俏皮，但不嘲讽对方、不开过火的玩笑。",
-    "firm": "直接明确：态度清楚，不绕弯、不道歉过头。",
-    "varied": "几条建议用不同语气（如简洁 / 友好 / 认真），让用户好挑选。",
+    "daily": (
+        "日常模式：写最正常的微信回复，像朋友或熟人平时聊天。"
+        "口语、自然、该短就短；不要暧昧推拉，不要职场套话，不要阴阳或刻意冷处理。"
+        "不要装策略、不要客服腔。"
+    ),
+    "dating_tease": (
+        "恋爱/暧昧 · 推拉俏皮：带一点神秘感和无害玩笑，若即若离，不要把话一次说满。"
+        "可以打趣、轻轻不接招、或把问题抛回去；不要油腻、不要连声夸奖、不要嘲讽对方的外貌或真心。"
+        "不要变成审讯或冷暴力；保持轻松、还能继续聊。"
+    ),
+    "dating_care": (
+        "恋爱/暧昧 · 情绪价值：接住对方的情绪，细腻关心，让人觉得被看见。"
+        "有温度但有边界：不要过度迎合、不要连发殷勤、不要把对方捧上天，不要显得舔狗或卑微。"
+        "关心要具体、克制，像在乎的人而不是讨好。"
+    ),
+    "dating_open": (
+        "恋爱/暧昧 · 延展话题：先接住对方刚说的，再用一个开放式问题把聊天往下带。"
+        "问题要好答、跟上下文有关；不要审讯、不要连续追问、不要尬聊清单。"
+        "目标是让对方愿意继续说，而不是把球踢死。"
+    ),
+    "work_efficient": (
+        "职场 · 专业高效：直接、清楚、可执行。优先确认收到、给结论或下一步。"
+        "少语气词、不卖萌、不闲聊；不要官腔堆砌，也不要越权承诺。"
+    ),
+    "work_deflect": (
+        "职场 · 委婉拒绝/延后：高情商打太极。表达理解，但不轻易答应；给出合理推迟或含蓄拒绝。"
+        "不伤和气、不甩锅、不编造尚未确认的时间或资源；给对方台阶，同时保住自己的边界。"
+    ),
+    "work_confirm": (
+        "职场 · 请示确认：下级对上级的稳妥回复。先复述关键信息，再请对方拍板或确认。"
+        "不擅自做主、不顶撞、不过度解释；礼貌、短、把选择权交回上级。"
+    ),
+    "clash_sarcastic": (
+        "怼人/防守 · 阴阳怪气：不带脏字、不人身攻击地怼回去，点到为止。"
+        "可以用轻嘲、反问或装听不懂来回击；不要升级成辱骂、威胁或翻旧账。"
+        "保持微信短句，像聪明人在回，不是在写吵架稿。"
+    ),
+    "clash_distance": (
+        "怼人/防守 · 礼貌保持距离：冷处理，礼貌但明显不想继续。"
+        "短、淡、收束话题；可以点头式结束，不要解释太多、不要继续争对错、不要假装热情。"
+        "不失礼，但让这段对话停住。"
+    ),
 }
 
 TONE_LABELS: dict[str, str] = {
-    "natural": "自然",
-    "concise": "简洁",
-    "friendly": "友好",
-    "professional": "得体",
-    "warm": "温柔",
-    "humorous": "幽默",
-    "firm": "直接",
-    "varied": "多样",
+    "daily": "日常",
+    "dating_tease": "推拉/俏皮",
+    "dating_care": "情绪价值",
+    "dating_open": "延展话题",
+    "work_efficient": "专业高效",
+    "work_deflect": "委婉拒绝/延后",
+    "work_confirm": "请示/确认",
+    "clash_sarcastic": "阴阳怪气",
+    "clash_distance": "礼貌距离",
 }
-
-
-def normalize_tone(value: str | None) -> ReplyTone:
-    key = (value or "natural").strip().lower()
-    if key in TONE_GUIDES:
-        return key  # type: ignore[return-value]
-    return "natural"
 
 
 def test_connection(settings: AppSettings) -> dict[str, Any]:
@@ -123,11 +151,14 @@ def suggest_replies(
             f"{safe_intent}\n\n"
         )
     tone = normalize_tone(settings.reply_tone)
-    style_bits = [f"语气要求：{TONE_GUIDES[tone]}"]
-    if tone != "varied":
-        style_bits.append(
-            f"这 {settings.n_suggestions} 套备选都保持同一语气；JSON 里 tone 字段统一写成「{TONE_LABELS[tone]}」。"
-        )
+    style_bits = [
+        f"当前策略：{TONE_LABELS[tone]}。{TONE_GUIDES[tone]}",
+        (
+            f"这 {settings.n_suggestions} 套备选都保持这一策略；"
+            f"JSON 里 tone 字段统一写成「{TONE_LABELS[tone]}」。"
+            "若与上面的通用要求冲突，以当前策略为准。"
+        ),
+    ]
     custom = (settings.system_style or "").strip()
     if custom:
         style_bits.append(f"用户额外风格说明：{custom}")
@@ -353,30 +384,85 @@ def _pack_suggestion(tone: str, bubbles: list[str]) -> dict:
     return {"tone": tone, "messages": bubbles, "text": "\n".join(bubbles)}
 
 
-def _parse_suggestions(raw: str, n: int) -> list[dict]:
+def _strip_fences(raw: str) -> str:
     text = raw.strip()
-    match = re.search(r"\{[\s\S]*\}", text)
-    if match:
-        text = match.group(0)
-    try:
-        data = json.loads(text)
-        items = data.get("suggestions") or data.get("replies") or []
-        out: list[dict] = []
-        for item in items:
-            bubbles = _normalize_bubbles(item)
-            if not bubbles:
+    text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.I)
+    text = re.sub(r"\s*```$", "", text)
+    return text.strip()
+
+
+def _iter_json_values(raw: str):
+    decoder = json.JSONDecoder()
+    i = 0
+    n = len(raw)
+    while i < n:
+        while i < n and raw[i] not in "{[":
+            i += 1
+        if i >= n:
+            return
+        try:
+            value, end = decoder.raw_decode(raw, i)
+        except json.JSONDecodeError:
+            i += 1
+            continue
+        yield value
+        i = max(end, i + 1)
+
+
+def _items_from_value(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        items: list[Any] = []
+        for el in value:
+            items.extend(_items_from_value(el))
+        return items
+    if isinstance(value, dict):
+        nested = value.get("suggestions")
+        if nested is None:
+            nested = value.get("replies")
+        if isinstance(nested, list):
+            return _items_from_value(nested)
+        if value.get("messages") or value.get("text") or value.get("reply"):
+            return [value]
+    if isinstance(value, str) and value.strip():
+        return [value]
+    return []
+
+
+def _suggestion_from_item(item: Any) -> dict | None:
+    bubbles = _normalize_bubbles(item)
+    if not bubbles:
+        return None
+    tone = "建议"
+    if isinstance(item, dict):
+        tone = str(item.get("tone") or item.get("style") or "建议").strip() or "建议"
+    return _pack_suggestion(tone, bubbles)
+
+
+def _parse_suggestions(raw: str, n: int) -> list[dict]:
+    text = _strip_fences(raw)
+    out: list[dict] = []
+    seen: set[str] = set()
+    for value in _iter_json_values(text):
+        for item in _items_from_value(value):
+            packed = _suggestion_from_item(item)
+            if not packed or packed["text"] in seen:
                 continue
-            tone = "建议"
-            if isinstance(item, dict):
-                tone = str(item.get("tone") or item.get("style") or "建议").strip() or "建议"
-            out.append(_pack_suggestion(tone, bubbles))
-        if out:
-            return out[:n]
-    except json.JSONDecodeError:
-        pass
+            seen.add(packed["text"])
+            out.append(packed)
+            if len(out) >= n:
+                return out
+    if out:
+        return out[:n]
 
     lines = [ln.strip(" -•\t") for ln in raw.splitlines() if ln.strip()]
-    fallback = [_pack_suggestion("建议", [redact_text(ln)]) for ln in lines if ln]
+    fallback: list[dict] = []
+    for ln in lines:
+        if ln[:1] in "{[":
+            continue
+        packed = _pack_suggestion("建议", [redact_text(ln)])
+        if packed["text"] and packed["text"] not in seen:
+            seen.add(packed["text"])
+            fallback.append(packed)
     if not fallback:
         raise ValueError("AI 没有给出可用的回复。")
     return fallback[:n]

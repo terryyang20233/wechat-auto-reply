@@ -51,18 +51,54 @@
               <button id="btn-suggest" class="primary" type="button">生成建议</button>
             </div>
           </div>
-          <div class="tone-row">
-            <label for="reply-tone">回复语气</label>
-            <select id="reply-tone" name="reply_tone">
-              <option value="natural">自然口语</option>
-              <option value="concise">简洁</option>
-              <option value="friendly">友好轻松</option>
-              <option value="professional">得体（工作）</option>
-              <option value="warm">温柔关心</option>
-              <option value="humorous">轻松幽默</option>
-              <option value="firm">直接明确</option>
-              <option value="varied">几种语气各一条</option>
-            </select>
+          <div class="tone-picker">
+            <div class="tone-label">回复语气</div>
+            <div class="tone-modes" role="tablist" aria-label="回复语气">
+              <button type="button" class="tone-mode is-on" data-mode="daily">日常</button>
+              <button type="button" class="tone-mode" data-mode="dating">恋爱/暧昧</button>
+              <button type="button" class="tone-mode" data-mode="work">职场/工作</button>
+              <button type="button" class="tone-mode" data-mode="clash">怼人/防守</button>
+            </div>
+            <div class="tone-choices" data-mode="dating" hidden>
+              <label class="tone-choice">
+                <input type="radio" name="tone-opt" value="dating_tease" />
+                <span>推拉/俏皮<small>制造神秘感或无害的玩笑</small></span>
+              </label>
+              <label class="tone-choice">
+                <input type="radio" name="tone-opt" value="dating_care" />
+                <span>情绪价值<small>细腻关心，但不显得舔狗</small></span>
+              </label>
+              <label class="tone-choice">
+                <input type="radio" name="tone-opt" value="dating_open" />
+                <span>延展话题<small>用开放式问题引导对方继续聊</small></span>
+              </label>
+            </div>
+            <div class="tone-choices" data-mode="work" hidden>
+              <label class="tone-choice">
+                <input type="radio" name="tone-opt" value="work_efficient" />
+                <span>专业高效<small>直接给方案，或确认收到</small></span>
+              </label>
+              <label class="tone-choice">
+                <input type="radio" name="tone-opt" value="work_deflect" />
+                <span>委婉拒绝/延后<small>高情商打太极，不伤和气</small></span>
+              </label>
+              <label class="tone-choice">
+                <input type="radio" name="tone-opt" value="work_confirm" />
+                <span>请示/确认<small>稳妥的下级对上级回复</small></span>
+              </label>
+            </div>
+            <div class="tone-choices" data-mode="clash" hidden>
+              <label class="tone-choice">
+                <input type="radio" name="tone-opt" value="clash_sarcastic" />
+                <span>阴阳怪气<small>不带脏字地怼回去</small></span>
+              </label>
+              <label class="tone-choice">
+                <input type="radio" name="tone-opt" value="clash_distance" />
+                <span>礼貌保持距离<small>冷处理，把话题收住</small></span>
+              </label>
+            </div>
+            <p class="tone-hint" id="tone-hint">最正常的日常微信，像平时聊天，不策略、不装。</p>
+            <input id="reply-tone" name="reply_tone" type="hidden" value="daily" />
           </div>
           <label class="intent-box" for="user-intent">我想说的（可选）
             <textarea id="user-intent" rows="3" maxlength="800" placeholder="例如：今晚不去了，改明天；顺便问他具体几点。会结合左侧聊天写成自然回复。"></textarea>
@@ -112,14 +148,21 @@
         </div>
         <label>默认回复语气
           <select name="reply_tone">
-            <option value="natural">自然口语</option>
-            <option value="concise">简洁</option>
-            <option value="friendly">友好轻松</option>
-            <option value="professional">得体（工作）</option>
-            <option value="warm">温柔关心</option>
-            <option value="humorous">轻松幽默</option>
-            <option value="firm">直接明确</option>
-            <option value="varied">几种语气各一条</option>
+            <option value="daily">日常（最正常）</option>
+            <optgroup label="恋爱/暧昧">
+              <option value="dating_tease">推拉/俏皮</option>
+              <option value="dating_care">情绪价值</option>
+              <option value="dating_open">延展话题</option>
+            </optgroup>
+            <optgroup label="职场/工作">
+              <option value="work_efficient">专业高效</option>
+              <option value="work_deflect">委婉拒绝/延后</option>
+              <option value="work_confirm">请示/确认</option>
+            </optgroup>
+            <optgroup label="怼人/防守">
+              <option value="clash_sarcastic">阴阳怪气</option>
+              <option value="clash_distance">礼貌保持距离</option>
+            </optgroup>
           </select>
         </label>
         <label>额外风格说明（可空）

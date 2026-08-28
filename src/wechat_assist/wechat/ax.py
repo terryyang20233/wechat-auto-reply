@@ -176,11 +176,14 @@ def process_identity() -> dict[str, Any]:
         if parent.name.endswith(".app") and (parent / "Contents").exists():
             python_app = str(parent)
             break
-    target = python_app or executable
+    launcher = Path.home() / "Applications" / "微信回复助手.app"
+    launcher_app = str(launcher) if launcher.exists() else None
+    target = launcher_app or python_app or executable
     return {
         "pid": os.getpid(),
         "executable": executable,
         "python_app": python_app,
+        "launcher_app": launcher_app,
         "ax_target": target,
     }
 
@@ -188,6 +191,13 @@ def process_identity() -> dict[str, Any]:
 def permission_hint() -> str:
     ident = process_identity()
     target = ident["ax_target"]
+    if ident.get("launcher_app"):
+        return (
+            "从 App 打开时，请把「微信回复助手」勾进辅助功能（和勾选 Cursor 是同一类开关）。"
+            "打开「系统设置 → 隐私与安全性 → 辅助功能」，找到「微信回复助手」并打开。"
+            f"若列表里没有，点「+」添加：\n{target}\n"
+            "打开开关后必须完全退出助手再打开一次。只勾选 Cursor 在关掉 Cursor 后会失效。"
+        )
     return (
         "授权 Cursor 还不够。读微信的是 Python 进程，系统要单独给它辅助功能权限。"
         "请打开「系统设置 → 隐私与安全性 → 辅助功能」，点左下角「+」，添加下面这个程序"

@@ -175,20 +175,67 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 .card-actions { display: flex; gap: 8px; margin-top: 8px; }
 .action-note { padding: 0 18px 16px; min-height: 1.4em; }
 
-.tone-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+.tone-picker {
   padding: 10px 18px 0;
+}
+.tone-label {
   font-size: 13px;
   color: var(--muted);
+  margin-bottom: 8px;
 }
-.tone-row select {
+.tone-modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.tone-mode {
+  font-size: 13px;
+  padding: 6px 11px;
+  border-radius: 999px;
+  color: var(--muted);
+}
+.tone-mode.is-on {
+  background: #e9f7ee;
+  border-color: #c9e6d3;
+  color: var(--green-ink);
+}
+.tone-choices {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+.tone-choice {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 8px 10px;
   border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 6px 10px;
+  border-radius: 12px;
   background: #fff;
+  cursor: pointer;
   color: var(--ink);
+  font-size: 13px;
+}
+.tone-choice input {
+  margin-top: 3px;
+  accent-color: var(--green);
+}
+.tone-choice span { flex: 1; }
+.tone-choice small {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+  margin-top: 1px;
+}
+.tone-choice:has(input:checked) {
+  border-color: #c9e6d3;
+  background: #f3faf5;
+}
+.tone-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--muted);
 }
 
 .intent-box {
