@@ -123,19 +123,41 @@ def suggest_replies(
     context = messages[-settings.context_messages :]
     if quote and (quote.get("text") or "").strip():
         context = list(context) + [quote]
-    safe_messages = anonymize_messages(
-        context,
-        chat_name=chat_name,
-        include_chat_name=settings.include_chat_name,
-    )
+    hide_names = settings.anonymize_names
+    if hide_names:
+        safe_messages = anonymize_messages(
+            context,
+            chat_name=chat_name,
+            include_chat_name=settings.include_chat_name,
+        )
+    else:
+        safe_messages = [
+            {
+                "sender": str(item.get("sender_name") or item.get("sender") or "对方"),
+                "text": redact_text(str(item.get("text") or "")),
+                **(
+                    {
+                        "quote_sender": str(item.get("quote_sender") or ""),
+                        "quote_text": redact_text(str(item.get("quote_text") or "")),
+                    }
+                    if item.get("quote_text")
+                    else {}
+                ),
+            }
+            for item in context
+        ]
     transcript = build_transcript(
         safe_messages,
-        chat_name=chat_name if settings.include_chat_name else None,
+        chat_name=redact_text(chat_name) if settings.include_chat_name and chat_name else None,
         include_chat_name=settings.include_chat_name,
     )
     extra = ""
     if quote and (quote.get("text") or "").strip():
-        quoted = describe_quote_for_model(quote, messages[-settings.context_messages :])
+        if hide_names:
+            quoted = describe_quote_for_model(quote, messages[-settings.context_messages :])
+        else:
+            who = str(quote.get("sender_name") or quote.get("sender") or "对方")
+            quoted = f"[{who}] {redact_text(str(quote.get('text') or ''))}"
         extra += (
             "用户指定要在微信里引用下面这条消息来回复，请专门针对它写建议：\n"
             f"{quoted}\n\n"
@@ -145,7 +167,7 @@ def suggest_replies(
         alias_source = list(messages[-settings.context_messages :])
         if quote:
             alias_source.append(quote)
-        safe_intent = scrub_user_note(intent, alias_source)
+        safe_intent = scrub_user_note(intent, alias_source) if hide_names else redact_text(intent)
         extra += (
             "用户想说的（请结合上下文改成自然回复，必须覆盖这些要点，不要逐条复述、不要添油加醋）：\n"
             f"{safe_intent}\n\n"

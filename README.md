@@ -1,8 +1,8 @@
 # WeChat Reply Assistant
 
-[中文说明](README.zh.md)
+**English** · [中文](README.zh.md)
 
-A **local AI reply helper** for WeChat on Mac: it reads the chat that is already open, asks **your** AI API for a few draft replies, and writes into the official WeChat client **only after you click**.
+A **local AI reply helper** for WeChat on Mac. It reads the chat that is already open, asks **your** AI API for a few draft replies, and writes into the official WeChat client **only after you click**.
 
 It is not a 24/7 auto-bot. Use it on your own Mac. Do not turn it into a mass-messaging tool.
 
@@ -22,18 +22,14 @@ Optional: click a bubble on the left to **quote** it. Suggestions target that me
 
 ### Reply tone
 
-On the suggestion panel (and in Settings) you can pick a tone before generating:
+On the suggestion panel (and in Settings) pick a mode, then a strategy:
 
-| Option | Effect |
+| Mode | Strategies |
 |---|---|
-| Natural | Casual WeChat voice (default) |
-| Concise | One or two short lines |
-| Friendly | Warm but not gushy |
-| Professional | Polite, work-safe |
-| Warm | Softer / caring |
-| Humorous | Light, not mocking |
-| Direct | Clear and firm |
-| Mixed | One suggestion per different tone |
+| Daily | Normal WeChat voice (default) |
+| Dating | Tease / emotional care / keep the thread going |
+| Work | Direct and efficient / polite delay or decline / confirm with a manager |
+| Clash | Dry sarcasm (no slurs) / polite distance |
 
 You can still add a free-text style note in Settings (for example: “reply in English if they used English”).
 
@@ -43,7 +39,7 @@ You can still add a free-text style note in Settings (for example: “reply in E
 
 - The server binds to `127.0.0.1` only. There is no project cloud and no account on our side.
 - Chat text is not logged or stored by default.
-- Before the model runs, speakers become `我 / 对方 / 成员N`, and obvious phone numbers are stripped.
+- Before the model runs, speakers become `我 / 对方 / 成员N`, and obvious phone numbers are stripped. You can turn name-hiding off in Settings; leave it on.
 - API keys live in `~/.wechat-assist/settings.json` with mode `600`. **Do not commit this file.**
 - To keep content off the network: choose **Ollama** and a local model.
 
@@ -66,13 +62,13 @@ Not zero risk: high-volume blasts, instant replies, and overnight auto-reply can
 - macOS
 - Python 3.11+
 - **WeChat for Mac** installed and signed in (developed against English UI 3.8.x)
-- System Settings → Privacy & Security → Accessibility: add **Python** (usually `Python.app`, e.g. a python.org install at  
+- System Settings → Privacy & Security → Accessibility: add **WeChat Reply Assistant** (`/Applications/微信回复助手.app`) **and** **Python** if you run from a venv (usually `Python.app`, e.g. a python.org install at  
   `/Library/Frameworks/Python.framework/Versions/3.12/Resources/Python.app`).  
-  Checking only Cursor or Terminal is not enough — the process that reads WeChat is Python. Restart the helper after granting access.
+  Checking only Cursor or Terminal is not enough — the process that reads WeChat is the app or Python. Restart the helper after granting access.
 
 ## Run
 
-Double-click `/Applications/微信回复助手.app` (same folder as 唱机). The first launch may install dependencies and then opens a browser; quitting from the Dock stops the local server.
+Double-click `/Applications/微信回复助手.app`. The first launch may install dependencies and then opens a browser; quitting from the Dock stops the local server.
 
 If the icon is missing:
 
@@ -107,19 +103,7 @@ Open [http://127.0.0.1:8765](http://127.0.0.1:8765) (this machine only).
 
 - Reading is unreliable if WeChat is minimized, the screen is locked, or the chat is fully covered.
 - This is not WeCom / Work WeChat Open Platform. It only helps **your own Mac client**.
-- After a WeChat UI change, the Accessibility tree may break. Use `/api/diagnostics/ax` to inspect controls, then adapt.  
+- After a WeChat UI change, the Accessibility tree may break. Use `/api/diagnostics/ax` locally to inspect controls, then adapt.  
   **Do not paste diagnostics, raw chat, or `settings.json` into a public issue.**
 
 By using this tool you understand that automating personal WeChat may violate WeChat’s software license. Account risk is yours. The helper stays on localhost and, by default, sends only after you confirm.
-
-## Publishing this repo (evaluation)
-
-The git remote already points at GitHub. Publishing as a **public** repo is possible but not free of product and policy risk. Recommended if you publish:
-
-1. **Keep it framed as a click-to-send helper**, never as an unattended bot. The current repo name `wechat-auto-reply` works against that story; `wechat-reply-assist` (or similar) is clearer.
-2. **Stay private until you are sure** no `settings.json`, API keys, Accessibility dumps, or real chat text ever landed in git history (`git log -p` / `gitleaks`). This snapshot looks clean: keys live under `~/.wechat-assist/`, and `.gitignore` already drops `settings.json`, `.env`, and dump files.
-3. **Do not ship `HANDOVER.md` on a public default branch** if you want less copy-paste of Accessibility internals. It is useful for local agents, not for end users. `LICENSE` should name a copyright holder before a public release.
-4. **GitHub ToS / WeChat ToS**: driving the official Mac client via Accessibility is not a protocol bot, but WeChat’s license still discourages automation. A public README must keep the risk table and “you click first” rule. GitHub may still take the repo down if it is marketed for spam or ban evasion.
-5. **If you go public**: MIT is already here; add Topics (`macos`, `accessibility`, `wechat`); pin the English README; link `README.zh.md`; never enable a hosted demo. Prefer **private** if this is only for you.
-
-This evaluation is not legal advice.

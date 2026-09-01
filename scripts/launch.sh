@@ -1,5 +1,5 @@
 #!/bin/bash
-# 微信回复助手启动器（唱机同款：StayOpen 小程序 + 后台服务）。
+# WeChat Reply Assistant launcher (StayOpen helper + local server).
 # WECHAT_ASSIST_DETACH=1：拉起服务、打开浏览器后退出（给 .app / AppleScript 用）。
 LOG="${HOME}/.wechat-assist/server.log"
 PID_FILE="${HOME}/.wechat-assist/server.pid"
