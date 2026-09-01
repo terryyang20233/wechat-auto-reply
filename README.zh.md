@@ -59,6 +59,16 @@
 
 ## 启动
 
+双击 `/Applications/微信回复助手.app`（和「唱机」同一文件夹）。第一次会装依赖并打开浏览器；从程序坞退出助手时会关掉后台服务。
+
+若还没有这个图标：
+
+```bash
+./scripts/install-app.sh
+```
+
+开发调试仍可用：
+
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate

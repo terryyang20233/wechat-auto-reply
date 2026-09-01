@@ -33,7 +33,7 @@ You are continuing a local macOS project: a **WeChat AI reply assistant** (not a
 - **Reply tone:** `reply_tone` in settings and the generate panel (`natural` / `concise` / `friendly` / `professional` / `warm` / `humorous` / `firm` / `varied`). Extra free-text is `system_style`.
 - **User intent:** optional `#user-intent` (max 800). POST `/api/suggest` field `intent`. Scrub via `privacy.scrub_user_note`.
 - **Multi-bubble suggestions:** each suggestion is `{tone, messages[], text}`. `MAX_BUBBLES = 3`. Prompt requires, when `n_suggestions >= 2`, at least one 1-bubble pack and at least one 2–3 bubble pack (models otherwise always emit length 1). POST `/api/send` accepts `messages: string[]`; fill-only fills **only the first** bubble. Confirm once, then send in order.
-- Accessibility: granting Cursor is not enough. Add **Python.app**, e.g. `/Library/Frameworks/Python.framework/Versions/3.12/Resources/Python.app`, then restart the assistant.
+- Accessibility: granting Cursor is not enough. Add **微信回复助手** (`/Applications/微信回复助手.app`) and/or **Python.app**, then restart the assistant.
 - Docs: English `README.md` + `README.zh.md`. Remote: `https://github.com/terryyang20233/wechat-auto-reply`. MIT `LICENSE` still has no personal copyright name.
 
 ## Important bugs already fixed (do not regress)

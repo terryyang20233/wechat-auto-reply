@@ -176,8 +176,16 @@ def process_identity() -> dict[str, Any]:
         if parent.name.endswith(".app") and (parent / "Contents").exists():
             python_app = str(parent)
             break
-    launcher = Path.home() / "Applications" / "微信回复助手.app"
-    launcher_app = str(launcher) if launcher.exists() else None
+    launcher = None
+    for candidate in (
+        Path("/Applications") / "微信回复助手.app",
+        Path.home() / "Applications" / "微信回复助手.app",
+        Path.home() / "Desktop" / "微信回复助手.app",
+    ):
+        if candidate.exists():
+            launcher = candidate
+            break
+    launcher_app = str(launcher) if launcher else None
     target = launcher_app or python_app or executable
     return {
         "pid": os.getpid(),

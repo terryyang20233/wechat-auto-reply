@@ -72,6 +72,16 @@ Not zero risk: high-volume blasts, instant replies, and overnight auto-reply can
 
 ## Run
 
+Double-click `/Applications/微信回复助手.app` (same folder as 唱机). The first launch may install dependencies and then opens a browser; quitting from the Dock stops the local server.
+
+If the icon is missing:
+
+```bash
+./scripts/install-app.sh
+```
+
+For development:
+
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
