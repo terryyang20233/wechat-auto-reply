@@ -4,6 +4,7 @@ import re
 import threading
 import time
 from dataclasses import dataclass, asdict
+from typing import Any
 
 from . import ax
 
@@ -116,18 +117,53 @@ _CACHE_LOCK = threading.Lock()
 _CACHE: ChatSnapshot | None = None
 _CACHE_AT = 0.0
 _CACHE_TTL = 1.5
+_INFLIGHT: threading.Event | None = None
+_INFLIGHT_SNAP: ChatSnapshot | None = None
+
+_TABLE_ROLES = {"AXTable", "AXList", "AXOutline"}
+_CHATS_LABELS = {"chats", "会话"}
+_SKIP_LIST_LABELS = {"chats", "会话", "contacts", "联系人"}
+_MSG_KEYS = ("messages", "消息", "chat history", "聊天记录", "search results")
 
 
 def read_current_chat(last_n: int = 20) -> ChatSnapshot:
-    global _CACHE, _CACHE_AT
+    global _CACHE, _CACHE_AT, _INFLIGHT, _INFLIGHT_SNAP
     now = time.monotonic()
     with _CACHE_LOCK:
         if _CACHE is not None and now - _CACHE_AT < _CACHE_TTL:
             return _CACHE
+        if _INFLIGHT is not None:
+            waiter = _INFLIGHT
+            leader = False
+        else:
+            waiter = threading.Event()
+            _INFLIGHT = waiter
+            _INFLIGHT_SNAP = None
+            leader = True
+    if not leader:
+        waiter.wait(timeout=60)
+        with _CACHE_LOCK:
+            return _INFLIGHT_SNAP or _CACHE or ChatSnapshot(
+                chat_name="",
+                messages=[],
+                input_ready=False,
+                wechat_running=False,
+                ax_trusted=False,
+                note="正在读取微信窗口。",
+            )
+    try:
         snap = _read_current_chat_uncached(last_n=last_n)
-        _CACHE = snap
-        _CACHE_AT = now
+        with _CACHE_LOCK:
+            _CACHE = snap
+            _CACHE_AT = time.monotonic()
+            _INFLIGHT_SNAP = snap
         return snap
+    finally:
+        with _CACHE_LOCK:
+            done = _INFLIGHT
+            _INFLIGHT = None
+        if done is not None:
+            done.set()
 
 
 def _read_current_chat_uncached(last_n: int = 20) -> ChatSnapshot:
@@ -164,9 +200,12 @@ def _read_current_chat_uncached(last_n: int = 20) -> ChatSnapshot:
             note=str(exc),
         )
 
-    chat_name = _read_chat_name(window)
-    input_node = _find_input_field(window)
-    messages = _read_messages(window, last_n=last_n)
+    messages_table, chats_table, input_areas = _scan_main_controls(window)
+    chat_name = _read_chat_name(window, chats_table=chats_table, input_areas=input_areas)
+    input_node = _pick_input(input_areas)
+    if input_node is None and not input_areas:
+        input_node = _find_input_field(window)
+    messages = _read_messages(window, last_n=last_n, table=messages_table)
     note = ""
     if not messages:
         note = "已打开微信，但当前窗口没有读到文本消息。请把某个聊天放到前台，并确保窗口未被遮挡。"
@@ -180,16 +219,63 @@ def _read_current_chat_uncached(last_n: int = 20) -> ChatSnapshot:
     )
 
 
-def _read_chat_name(window) -> str:
+def _scan_main_controls(window) -> tuple[Any | None, Any | None, list[ax.AXNode]]:
+    """One cheap pass: Messages table, Chats table, composer text areas."""
+    messages_table = None
+    chats_table = None
+    areas: list[ax.AXNode] = []
+    stack: list[tuple[Any, int]] = [(window, 0)]
+    seen = 0
+    while stack:
+        current, depth = stack.pop()
+        seen += 1
+        if seen > 450:
+            break
+        role = ax.ax_role(current)
+        if role in ax.SKIP_DESCEND_ROLES:
+            continue
+        if role in _TABLE_ROLES:
+            title = ax.ax_str(ax.ax_get(current, ax.AX_TITLE))
+            desc = ax.ax_str(ax.ax_get(current, ax.AX_DESCRIPTION))
+            blob = f"{title} {desc}".lower()
+            stripped = blob.strip()
+            if stripped in _CHATS_LABELS:
+                if chats_table is None:
+                    chats_table = current
+            elif stripped not in _SKIP_LIST_LABELS and any(key in blob for key in _MSG_KEYS):
+                if messages_table is None:
+                    messages_table = current
+        elif role == "AXTextArea":
+            title = ax.ax_str(ax.ax_get(current, ax.AX_TITLE))
+            ident = ax.ax_str(ax.ax_get(current, ax.AX_IDENTIFIER))
+            desc = ax.ax_str(ax.ax_get(current, ax.AX_DESCRIPTION))
+            blob = f"{title} {ident} {desc}".lower()
+            if "search" not in blob and "搜索" not in title and "搜索" not in desc:
+                areas.append(ax.describe(current, geometry=True, value=False))
+        if depth >= 10:
+            continue
+        children = list(ax.ax_get(current, ax.AX_CHILDREN) or [])
+        for child in reversed(children[:40]):
+            stack.append((child, depth + 1))
+    return messages_table, chats_table, areas
+
+
+def _read_chat_name(
+    window,
+    chats_table: Any | None = None,
+    input_areas: list[ax.AXNode] | None = None,
+) -> str:
     title = ax.ax_str(ax.ax_get(window, ax.AX_TITLE))
     if title and not _is_generic_title(title):
         return _strip_member_count(title)
 
-    from_session = _chat_name_from_session_list(window)
+    from_session = _chat_name_from_session_list(window, chats_table=chats_table)
     if from_session:
         return from_session
 
-    input_node = _find_input_field(window)
+    input_node = _pick_input(input_areas or [])
+    if input_node is None and not input_areas:
+        input_node = _find_input_field(window)
     if input_node and input_node.title and not _is_generic_title(input_node.title):
         return _strip_member_count(input_node.title)
 
@@ -234,20 +320,20 @@ def _read_chat_name(window) -> str:
     return "当前聊天"
 
 
-def _chat_name_from_session_list(window) -> str:
-    table = ax.dfs(
-        window,
-        lambda n: n.role == "AXTable" and n.description.lower() in {"chats", "会话"},
-        max_depth=10,
-        max_nodes=400,
-    )
-    if table is None:
+def _chat_name_from_session_list(window, chats_table: Any | None = None) -> str:
+    table_el = chats_table
+    if table_el is None:
+        table = ax.dfs(
+            window,
+            lambda n: n.role == "AXTable" and n.description.lower() in {"chats", "会话"},
+            max_depth=10,
+            max_nodes=400,
+        )
+        table_el = table.element if table else None
+    if table_el is None:
         return ""
-    for row in list(ax.ax_get(table.element, ax.AX_CHILDREN) or []):
-        if not bool(ax.ax_get(row, ax.AX_SELECTED)):
-            cells = list(ax.ax_get(row, ax.AX_CHILDREN) or [])
-            if not any(bool(ax.ax_get(cell, ax.AX_SELECTED)) for cell in cells[:3]):
-                continue
+    rows = ax.selected_table_rows(table_el)
+    for row in rows:
         raw = _row_description(row)
         name = raw.split(",")[0].strip()
         if name and not _is_generic_title(name) and not ax.is_chrome_text(name):
@@ -272,29 +358,12 @@ def _strip_member_count(name: str) -> str:
     return text
 
 
-def _find_input_field(window) -> ax.AXNode | None:
-    areas = ax.collect(
-        window,
-        lambda n: n.role == "AXTextArea"
-        and "search" not in (n.title + n.identifier + n.description).lower()
-        and "搜索" not in (n.title + n.description),
-        max_depth=10,
-        max_nodes=220,
-        geometry=True,
-        value=False,
-    )
-    if not areas:
-        areas = ax.collect(
-            window,
-            lambda n: n.role == "AXTextField"
-            and "search" not in (n.title + n.identifier + n.description).lower()
-            and "搜索" not in (n.title + n.description)
-            and not n.identifier.endswith("18"),
-            max_depth=8,
-            max_nodes=160,
-            geometry=True,
-            value=False,
-        )
+def _is_composer_field(node: ax.AXNode) -> bool:
+    blob = f"{node.title} {node.identifier} {node.description}".lower()
+    return "search" not in blob and "搜索" not in node.title and "搜索" not in node.description
+
+
+def _pick_input(areas: list[ax.AXNode]) -> ax.AXNode | None:
     if not areas:
         return None
 
@@ -302,16 +371,49 @@ def _find_input_field(window) -> ax.AXNode | None:
         y = node.y or 0.0
         w = node.w or 0.0
         titled = 1 if node.title else 0
-        return (titled, y, w)
+        known = 1 if node.identifier in ax.INPUT_IDENTIFIERS else 0
+        return (known, titled, y, w)
 
-    areas.sort(key=score, reverse=True)
-    return areas[0]
+    ranked = [n for n in areas if _is_composer_field(n)]
+    if not ranked:
+        return None
+    ranked.sort(key=score, reverse=True)
+    return ranked[0]
 
 
-def _read_messages(window, last_n: int) -> list[Message]:
-    table = _find_transcript_table(window)
-    if table is not None:
-        parsed = _messages_from_table(table.element)
+def _find_input_field(window) -> ax.AXNode | None:
+    areas = ax.collect(
+        window,
+        lambda n: n.role == "AXTextArea" and _is_composer_field(n),
+        max_depth=10,
+        max_nodes=220,
+        geometry=False,
+        value=False,
+    )
+    if areas:
+        return _pick_input([ax.describe(n.element, geometry=True) for n in areas])
+    fields = ax.collect(
+        window,
+        lambda n: n.role == "AXTextField"
+        and _is_composer_field(n)
+        and not n.identifier.endswith("18"),
+        max_depth=8,
+        max_nodes=160,
+        geometry=False,
+        value=False,
+    )
+    if not fields:
+        return None
+    return _pick_input([ax.describe(n.element, geometry=True) for n in fields])
+
+
+def _read_messages(window, last_n: int, table: Any | None = None) -> list[Message]:
+    table_el = table
+    if table_el is None:
+        found = _find_transcript_table(window)
+        table_el = found.element if found else None
+    if table_el is not None:
+        parsed = _messages_from_table(table_el, last_n=last_n)
         if parsed:
             return parsed[-last_n:]
 
@@ -356,10 +458,25 @@ def _find_transcript_table(window) -> ax.AXNode | None:
     return found
 
 
-def _messages_from_table(table_el) -> list[Message]:
+def _messages_from_table(table_el, last_n: int | None = None) -> list[Message]:
+    visible = ax.ax_get(table_el, ax.AX_VISIBLE_ROWS)
+    if visible:
+        parsed = _parse_table_rows(list(visible), last_n=None)
+        if parsed and (not last_n or len(parsed) >= last_n):
+            return parsed
+    rows = ax.table_rows(table_el)
+    return _parse_table_rows(rows, last_n=last_n)
+
+
+def _parse_table_rows(rows: list[Any], last_n: int | None = None) -> list[Message]:
+    if not rows:
+        return []
+    if last_n:
+        slack = max(8, last_n * 3)
+        rows = rows[-slack:]
     out: list[Message] = []
     seen: set[str] = set()
-    for row in list(ax.ax_get(table_el, ax.AX_CHILDREN) or []):
+    for row in rows:
         raw = _row_description(row)
         if not raw:
             continue
@@ -380,7 +497,7 @@ def find_message_button(window, target: dict) -> ax.AXNode | None:
         return None
     wanted = _message_key(target)
     match_el = None
-    for row in list(ax.ax_get(table.element, ax.AX_CHILDREN) or []):
+    for row in ax.table_rows(table.element):
         item = parse_accessible_text(_row_description(row))
         if item is None or _message_key(item.to_dict()) != wanted:
             continue
@@ -413,16 +530,26 @@ def _first_button(row_el):
 
 
 def _row_description(row_el) -> str:
+    desc = ax.ax_str(ax.ax_get(row_el, ax.AX_DESCRIPTION))
+    if desc:
+        return desc
+    title = ax.ax_str(ax.ax_get(row_el, ax.AX_TITLE))
+    if title:
+        return title
     queue = [row_el]
     seen = 0
-    while queue and seen < 16:
+    while queue and seen < 8:
         el = queue.pop(0)
         seen += 1
-        node = ax.describe(el)
-        text = (node.description or node.value or node.title).strip()
-        if text:
-            return text
-        queue.extend(list(ax.ax_get(el, ax.AX_CHILDREN) or [])[:6])
+        if el is not row_el:
+            text = (
+                ax.ax_str(ax.ax_get(el, ax.AX_DESCRIPTION))
+                or ax.ax_str(ax.ax_get(el, ax.AX_VALUE))
+                or ax.ax_str(ax.ax_get(el, ax.AX_TITLE))
+            )
+            if text:
+                return text
+        queue.extend(list(ax.ax_get(el, ax.AX_CHILDREN) or [])[:4])
     return ""
 
 

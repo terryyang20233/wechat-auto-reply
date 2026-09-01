@@ -207,6 +207,16 @@ def _use_gemini(settings: AppSettings) -> bool:
 
 GEMINI_DEFAULT_MODEL = "gemini-3.6-flash"
 GEMINI_FALLBACK_MODELS = ("gemini-3.6-flash", "gemini-flash-latest", "gemini-2.5-flash")
+AI_TIMEOUT = httpx.Timeout(connect=15.0, read=90.0, write=30.0, pool=15.0)
+AI_TIMEOUT_MESSAGE = "AI 接口等待超时。请再试一次；若经常出现，可换更快的模型（例如 gemini-3.1-flash-lite）。"
+
+
+def _post_json(url: str, *, headers: dict[str, str], payload: dict[str, Any]) -> httpx.Response:
+    try:
+        with httpx.Client(timeout=AI_TIMEOUT, trust_env=True) as client:
+            return client.post(url, headers=headers, json=payload)
+    except httpx.TimeoutException as exc:
+        raise ValueError(AI_TIMEOUT_MESSAGE) from exc
 
 
 def _complete_gemini(settings: AppSettings, user_prompt: str) -> str:
@@ -242,6 +252,8 @@ def _complete_gemini(settings: AppSettings, user_prompt: str) -> str:
         except ValueError as exc:
             last_error = exc
             msg = str(exc).lower()
+            if AI_TIMEOUT_MESSAGE in str(exc):
+                raise
             if "no longer available" in msg or "not found" in msg or "not supported" in msg:
                 continue
             raise
@@ -257,6 +269,20 @@ def _persist_gemini_model(settings: AppSettings, model: str) -> None:
         pass
 
 
+def _gemini_generation_config(model: str) -> dict[str, Any]:
+    config: dict[str, Any] = {
+        "responseMimeType": "application/json",
+        "maxOutputTokens": 2048,
+    }
+    if model.startswith("gemini-3"):
+        # Gemini 3 defaults to medium thinking, which can exceed our HTTP read timeout.
+        config["thinkingConfig"] = {"thinkingLevel": "MINIMAL"}
+    else:
+        config["temperature"] = 0.7
+        config["thinkingConfig"] = {"thinkingBudget": 0}
+    return config
+
+
 def _gemini_generate(base: str, api_key: str, model: str, user_prompt: str) -> str:
     url = f"{base}/models/{model}:generateContent"
     headers = {
@@ -266,16 +292,20 @@ def _gemini_generate(base: str, api_key: str, model: str, user_prompt: str) -> s
     payload = {
         "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
         "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
-        "generationConfig": {
-            "temperature": 0.7,
-            "responseMimeType": "application/json",
-        },
+        "generationConfig": _gemini_generation_config(model),
     }
-    with httpx.Client(timeout=60.0) as client:
-        response = client.post(url, headers=headers, json=payload)
+    response = _post_json(url, headers=headers, payload=payload)
+    if response.status_code >= 400:
+        lowered = (response.text or "").lower()
+        if "thinking" in lowered or "temperature" in lowered:
+            payload["generationConfig"] = {
+                "responseMimeType": "application/json",
+                "maxOutputTokens": 2048,
+            }
+            response = _post_json(url, headers=headers, payload=payload)
         if response.status_code >= 400:
             raise ValueError(_gemini_error(response))
-        data = response.json()
+    data = response.json()
     try:
         parts = data["candidates"][0]["content"]["parts"]
         text = "".join(str(p.get("text") or "") for p in parts)
@@ -321,10 +351,9 @@ def _complete_openai_compatible(settings: AppSettings, user_prompt: str) -> str:
         ],
     }
     url = f"{base}/chat/completions"
-    with httpx.Client(timeout=60.0) as client:
-        response = client.post(url, headers=headers, json=payload)
-        response.raise_for_status()
-        data = response.json()
+    response = _post_json(url, headers=headers, payload=payload)
+    response.raise_for_status()
+    data = response.json()
     try:
         return data["choices"][0]["message"]["content"]
     except Exception as exc:
@@ -346,10 +375,9 @@ def _complete_anthropic(settings: AppSettings, user_prompt: str) -> str:
         "system": SYSTEM_PROMPT,
         "messages": [{"role": "user", "content": user_prompt}],
     }
-    with httpx.Client(timeout=60.0) as client:
-        response = client.post(f"{base}/v1/messages", headers=headers, json=payload)
-        response.raise_for_status()
-        data = response.json()
+    response = _post_json(f"{base}/v1/messages", headers=headers, payload=payload)
+    response.raise_for_status()
+    data = response.json()
     parts = data.get("content") or []
     text = "".join(p.get("text", "") for p in parts if p.get("type") == "text")
     if not text:

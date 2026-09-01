@@ -25,6 +25,9 @@ AX_SELECTED = "AXSelected"
 AX_PLACEHOLDER = "AXPlaceholderValue"
 AX_PRESS = "AXPress"
 AX_SHOW_MENU = "AXShowMenu"
+AX_ROWS = "AXRows"
+AX_VISIBLE_ROWS = "AXVisibleRows"
+AX_SELECTED_ROWS = "AXSelectedRows"
 
 MESSAGE_LIST_TITLES = {"messages", "消息"}
 INPUT_IDENTIFIERS = {"chat_input_field", "chatInputField", "message_input"}
@@ -186,7 +189,11 @@ def process_identity() -> dict[str, Any]:
             launcher = candidate
             break
     launcher_app = str(launcher) if launcher else None
-    target = launcher_app or python_app or executable
+    inside_app = "微信回复助手.app" in executable
+    if inside_app:
+        target = launcher_app or executable
+    else:
+        target = python_app or executable
     return {
         "pid": os.getpid(),
         "executable": executable,
@@ -198,19 +205,22 @@ def process_identity() -> dict[str, Any]:
 
 def permission_hint() -> str:
     ident = process_identity()
-    target = ident["ax_target"]
-    if ident.get("launcher_app"):
+    exe = ident.get("executable") or ""
+    if "微信回复助手.app" in exe:
+        target = ident.get("launcher_app") or ident["ax_target"]
         return (
-            "从 App 打开时，请把「微信回复助手」勾进辅助功能（和勾选 Cursor 是同一类开关）。"
+            "请把「微信回复助手」勾进辅助功能。"
             "打开「系统设置 → 隐私与安全性 → 辅助功能」，找到「微信回复助手」并打开。"
             f"若列表里没有，点「+」添加：\n{target}\n"
-            "打开开关后必须完全退出助手再打开一次。只勾选 Cursor 在关掉 Cursor 后会失效。"
+            "打开开关后必须完全退出助手再打开一次。只勾选 Cursor 无效。"
         )
+    target = ident.get("python_app") or exe
     return (
-        "授权 Cursor 还不够。读微信的是 Python 进程，系统要单独给它辅助功能权限。"
+        "授权「微信回复助手」图标还不够：当前实际读微信的是 Python 进程。"
         "请打开「系统设置 → 隐私与安全性 → 辅助功能」，点左下角「+」，添加下面这个程序"
         f"（列表里可能叫 Python）：\n{target}\n"
-        "添加并打开开关后，必须重启本助手才会生效。Terminal / iTerm 只有在你从那里启动时才需要。"
+        "添加并打开开关后，必须重启本助手才会生效。"
+        "若你是从 App 打开却看到这条说明，请重新运行 scripts/install-app.sh。"
     )
 
 
@@ -270,6 +280,38 @@ def ax_str(value: Any) -> str:
         return str(value).strip()
     except Exception:
         return ""
+
+
+def ax_role(element: Any) -> str:
+    return ax_str(ax_get(element, AX_ROLE))
+
+
+def table_rows(table_el: Any, *, visible: bool = False) -> list[Any]:
+    """Prefer native table row attributes so we don't walk every AX child."""
+    attrs = (AX_VISIBLE_ROWS, AX_ROWS, AX_CHILDREN) if visible else (AX_ROWS, AX_VISIBLE_ROWS, AX_CHILDREN)
+    for attr in attrs:
+        rows = ax_get(table_el, attr)
+        if rows:
+            return list(rows)
+    return []
+
+
+def selected_table_rows(table_el: Any) -> list[Any]:
+    rows = ax_get(table_el, AX_SELECTED_ROWS)
+    if rows:
+        return list(rows)
+    found: list[Any] = []
+    visible = ax_get(table_el, AX_VISIBLE_ROWS)
+    candidates = list(visible) if visible else table_rows(table_el)[:80]
+    for row in candidates:
+        if bool(ax_get(row, AX_SELECTED)):
+            found.append(row)
+            break
+        cells = list(ax_get(row, AX_CHILDREN) or [])[:3]
+        if any(bool(ax_get(cell, AX_SELECTED)) for cell in cells):
+            found.append(row)
+            break
+    return found
 
 
 def ax_point(element: Any) -> tuple[float, float] | None:
